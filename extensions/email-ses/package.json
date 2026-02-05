@@ -1,0 +1,35 @@
+{
+  "name": "@openclaw/email-ses",
+  "version": "2026.1.30",
+  "description": "OpenClaw Email channel plugin (AWS SES)",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.750.0"
+  },
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "channel": {
+      "id": "email-ses",
+      "label": "Email (AWS SES)",
+      "selectionLabel": "Email via AWS SES",
+      "docsPath": "/channels/email-ses",
+      "docsLabel": "email-ses",
+      "blurb": "Send email replies via AWS SES",
+      "aliases": [
+        "email",
+        "ses"
+      ],
+      "order": 80
+    },
+    "install": {
+      "npmSpec": "@openclaw/email-ses",
+      "localPath": "extensions/email-ses",
+      "defaultChoice": "npm"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "email-ses",
+  "channels": ["email-ses"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
