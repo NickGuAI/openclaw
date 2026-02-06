@@ -8,9 +8,14 @@ vi.mock("./gmail-auth.js", () => ({
 vi.mock("./delivery-context.js", () => ({
   readDeliveryContext: vi.fn().mockResolvedValue(null),
   updateDeliveryContextMessageId: vi.fn().mockResolvedValue(undefined),
+  writeMessageIdIndex: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { readDeliveryContext, updateDeliveryContextMessageId } from "./delivery-context.js";
+import {
+  readDeliveryContext,
+  updateDeliveryContextMessageId,
+  writeMessageIdIndex,
+} from "./delivery-context.js";
 import { refreshGmailAccessToken, resolveGmailCredentials } from "./gmail-auth.js";
 import { sendEmailGmail } from "./send.js";
 
@@ -117,6 +122,12 @@ describe("sendEmailGmail", () => {
     expect(updateDeliveryContextMessageId).toHaveBeenCalledWith(
       "<root@superhuman.com>",
       expect.stringContaining("@openclaw.email"),
+    );
+
+    // Message-ID index written for cross-domain thread resolution
+    expect(writeMessageIdIndex).toHaveBeenCalledWith(
+      expect.stringContaining("@openclaw.email"),
+      "<root@superhuman.com>",
     );
   });
 

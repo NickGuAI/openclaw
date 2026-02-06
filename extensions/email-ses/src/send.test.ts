@@ -16,9 +16,14 @@ vi.mock("@aws-sdk/client-ses", () => ({
 vi.mock("./delivery-context.js", () => ({
   readDeliveryContext: vi.fn().mockResolvedValue(null),
   updateDeliveryContextMessageId: vi.fn().mockResolvedValue(undefined),
+  writeMessageIdIndex: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { readDeliveryContext, updateDeliveryContextMessageId } from "./delivery-context.js";
+import {
+  readDeliveryContext,
+  updateDeliveryContextMessageId,
+  writeMessageIdIndex,
+} from "./delivery-context.js";
 import { sendEmailSes } from "./send.js";
 
 describe("sendEmailSes", () => {
@@ -102,6 +107,26 @@ describe("sendEmailSes", () => {
     expect(rawData).toContain("https://example.com/image.png");
   });
 
+  it("writes message-ID index after sending with threadId", async () => {
+    vi.mocked(readDeliveryContext).mockResolvedValueOnce({
+      threadId: "thread789",
+      subject: "Test",
+      messageId: "<original@gmail.com>",
+      from: "User <user@example.com>",
+    });
+
+    await sendEmailSes({
+      cfg: baseCfg,
+      to: "user@example.com##thread789",
+      text: "Reply",
+    });
+
+    expect(writeMessageIdIndex).toHaveBeenCalledWith(
+      expect.stringContaining("@email.amazonses.com"),
+      "thread789",
+    );
+  });
+
   it("does not update delivery context when no threadId", async () => {
     await sendEmailSes({
       cfg: baseCfg,
@@ -110,5 +135,6 @@ describe("sendEmailSes", () => {
     });
 
     expect(updateDeliveryContextMessageId).not.toHaveBeenCalled();
+    expect(writeMessageIdIndex).not.toHaveBeenCalled();
   });
 });

@@ -3,8 +3,16 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { EmailDeliveryContext } from "./types.js";
 
+function getBaseDir(): string {
+  return join(homedir(), ".openclaw", "email-gmail");
+}
+
 function getContextsDir(): string {
-  return join(homedir(), ".openclaw", "email-gmail", "contexts");
+  return join(getBaseDir(), "contexts");
+}
+
+function getMsgIndexDir(): string {
+  return join(getBaseDir(), "msg-index");
 }
 
 function contextPath(threadId: string): string {
@@ -48,4 +56,24 @@ export async function updateDeliveryContextMessageId(
   }
 
   await writeDeliveryContext(threadId, ctx);
+}
+
+function sanitize(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+// Message-ID index: maps outbound Message-IDs back to thread keys
+// so inbound replies can resolve to the correct thread.
+export async function writeMessageIdIndex(messageId: string, threadKey: string): Promise<void> {
+  const dir = getMsgIndexDir();
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, `${sanitize(messageId)}.txt`), threadKey, "utf-8");
+}
+
+export async function resolveThreadKeyByMessageId(messageId: string): Promise<string | null> {
+  try {
+    return (await readFile(join(getMsgIndexDir(), `${sanitize(messageId)}.txt`), "utf-8")).trim();
+  } catch {
+    return null;
+  }
 }

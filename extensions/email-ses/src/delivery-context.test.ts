@@ -4,11 +4,14 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   readDeliveryContext,
+  resolveThreadKeyByMessageId,
   updateDeliveryContextMessageId,
   writeDeliveryContext,
+  writeMessageIdIndex,
 } from "./delivery-context.js";
 
 const testDir = join(homedir(), ".openclaw", "email-ses", "contexts");
+const testMsgIndexDir = join(homedir(), ".openclaw", "email-ses", "msg-index");
 
 describe("delivery-context", () => {
   const testThreadId = `test-thread-${Date.now()}`;
@@ -68,5 +71,28 @@ describe("delivery-context", () => {
     } catch {
       // ignore
     }
+  });
+
+  it("writes and resolves message-ID index", async () => {
+    const msgId = `<test-${Date.now()}@ses.com>`;
+    const threadKey = "test-thread-key";
+
+    await writeMessageIdIndex(msgId, threadKey);
+    const resolved = await resolveThreadKeyByMessageId(msgId);
+
+    expect(resolved).toBe(threadKey);
+
+    // Clean up
+    try {
+      const safe = msgId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      await rm(join(testMsgIndexDir, `${safe}.txt`), { force: true });
+    } catch {
+      // ignore
+    }
+  });
+
+  it("returns null for unknown message-ID", async () => {
+    const result = await resolveThreadKeyByMessageId("<nonexistent@test.com>");
+    expect(result).toBeNull();
   });
 });

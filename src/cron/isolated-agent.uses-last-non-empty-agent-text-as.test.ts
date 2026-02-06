@@ -587,4 +587,53 @@ describe("runCronIsolatedAgentTurn", () => {
       expect(second?.sessionId).not.toBe(first?.sessionId);
     });
   });
+
+  it("reuses session id for non-cron session keys", async () => {
+    await withTempHome(async (home) => {
+      const storePath = await writeSessionStore(home);
+      const deps: CliDeps = {
+        sendMessageWhatsApp: vi.fn(),
+        sendMessageTelegram: vi.fn(),
+        sendMessageDiscord: vi.fn(),
+        sendMessageSignal: vi.fn(),
+        sendMessageIMessage: vi.fn(),
+      };
+      vi.mocked(runEmbeddedPiAgent).mockResolvedValue({
+        payloads: [{ text: "ok" }],
+        meta: {
+          durationMs: 5,
+          agentMeta: { sessionId: "s", provider: "p", model: "m" },
+        },
+      });
+
+      const cfg = makeCfg(home, storePath);
+      const job = makeJob({ kind: "agentTurn", message: "ping", deliver: false });
+      const sessionKey = "email:thread:test-thread";
+      const agentSessionKey = "agent:main:email:thread:test-thread";
+
+      await runCronIsolatedAgentTurn({
+        cfg,
+        deps,
+        job,
+        message: "ping",
+        sessionKey,
+        lane: "cron",
+      });
+      const first = await readSessionEntry(storePath, agentSessionKey);
+
+      await runCronIsolatedAgentTurn({
+        cfg,
+        deps,
+        job,
+        message: "ping",
+        sessionKey,
+        lane: "cron",
+      });
+      const second = await readSessionEntry(storePath, agentSessionKey);
+
+      expect(first?.sessionId).toBeDefined();
+      expect(second?.sessionId).toBeDefined();
+      expect(second?.sessionId).toBe(first?.sessionId);
+    });
+  });
 });

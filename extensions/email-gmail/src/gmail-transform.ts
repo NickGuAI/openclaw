@@ -1,5 +1,9 @@
-import { writeDeliveryContext } from "./delivery-context.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { resolveThreadKeyByMessageId, writeDeliveryContext } from "./delivery-context.js";
 import { stripQuotedReply } from "./strip-quotes.js";
+
+const execFileAsync = promisify(execFile);
 
 type GmailMessage = {
   id: string;
@@ -14,15 +18,47 @@ type GmailMessage = {
   labels?: string[];
   messageId?: string;
   references?: string;
+  inReplyTo?: string;
 };
 
-// Extract the first Message-ID from a References header.
-// In a thread, the first reference is the root message — stable across
-// all replies regardless of SMTP domain (Superhuman, SES, Gmail, etc.).
-function extractRootReference(references?: string): string | undefined {
-  if (!references) return undefined;
-  const match = references.match(/<[^>]+>/);
-  return match ? match[0] : undefined;
+type EmailHeaders = {
+  messageId?: string;
+  references?: string;
+  inReplyTo?: string;
+};
+
+// Fetch RFC 2822 headers from Gmail API via gog CLI.
+// gog handles OAuth; we just need the message ID.
+async function fetchMessageHeaders(msgId: string, account?: string): Promise<EmailHeaders> {
+  try {
+    const args = [
+      "gmail",
+      "get",
+      msgId,
+      "--format=metadata",
+      "--headers=References,Message-Id,In-Reply-To",
+      "--json",
+    ];
+    if (account) args.push("--account", account);
+    const { stdout } = await execFileAsync("gog", args, {
+      timeout: 5000,
+      env: { ...process.env },
+    });
+    const data = JSON.parse(stdout);
+    const headers = data.message?.payload?.headers as
+      | Array<{ name: string; value: string }>
+      | undefined;
+    if (!headers) return {};
+    const result: EmailHeaders = {};
+    for (const h of headers) {
+      if (h.name === "Message-ID" || h.name === "Message-Id") result.messageId = h.value;
+      if (h.name === "References") result.references = h.value;
+      if (h.name === "In-Reply-To") result.inReplyTo = h.value;
+    }
+    return result;
+  } catch {
+    return {};
+  }
 }
 
 function extractEmail(from: string): string {
@@ -64,19 +100,28 @@ export default async function transform(ctx: {
   const body = msg.body || msg.snippet || "";
   const strippedBody = stripQuotedReply(body);
 
-  // Use first Message-ID from References as stable thread key.
-  // Gmail may assign different threadIds when messages cross SMTP domains
-  // (e.g. Superhuman → SES), but References preserves the real chain.
-  const rootRef = extractRootReference(msg.references);
-  const threadKey = rootRef || msg.messageId || msg.threadId || msg.id;
+  // Fetch RFC 2822 headers from Gmail API (gog doesn't include them in webhook).
+  // Uses In-Reply-To to resolve cross-domain threads where Gmail assigns
+  // different threadIds (e.g. Superhuman → SES).
+  const account = msg.to ? extractEmail(msg.to) : undefined;
+  const hdrs = await fetchMessageHeaders(msg.id, account);
+
+  // Merge: prefer fetched headers, fall back to payload fields
+  const messageId = hdrs.messageId || msg.messageId;
+  const references = hdrs.references || msg.references;
+  const inReplyTo = hdrs.inReplyTo || msg.inReplyTo;
+
+  // Resolve thread key: if this message replies to a known outbound message,
+  // use the same thread key as the original conversation.
+  const existingThreadKey = inReplyTo ? await resolveThreadKeyByMessageId(inReplyTo) : null;
+  const threadKey = existingThreadKey || messageId || msg.threadId || msg.id;
   const gmailThreadId = msg.threadId || msg.id;
 
-  // Persist delivery context for use by the send function
   await writeDeliveryContext(threadKey, {
     threadId: gmailThreadId,
-    messageId: msg.messageId,
+    messageId,
     subject: msg.subject,
-    references: msg.references,
+    references,
     from: msg.from,
   });
 

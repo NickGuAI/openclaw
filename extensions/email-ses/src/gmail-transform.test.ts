@@ -1,12 +1,37 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Mock execFile with custom promisify support so promisify(execFile) returns our mock.
+// Node's promisify uses Symbol.for('nodejs.util.promisify.custom') for execFile.
+const { mockExecFileAsync } = vi.hoisted(() => ({
+  mockExecFileAsync: vi.fn(),
+}));
+
+vi.mock("node:child_process", () => {
+  const fn = (() => {}) as any;
+  fn[Symbol.for("nodejs.util.promisify.custom")] = mockExecFileAsync;
+  return { execFile: fn };
+});
 
 // Mock delivery-context
 vi.mock("./delivery-context.js", () => ({
   writeDeliveryContext: vi.fn().mockResolvedValue(undefined),
+  resolveThreadKeyByMessageId: vi.fn().mockResolvedValue(null),
 }));
 
-import { writeDeliveryContext } from "./delivery-context.js";
+import { resolveThreadKeyByMessageId, writeDeliveryContext } from "./delivery-context.js";
 import transform from "./gmail-transform.js";
+
+// Helper: make gog return specific headers
+function mockGogHeaders(headers: Array<{ name: string; value: string }>) {
+  mockExecFileAsync.mockResolvedValueOnce({
+    stdout: JSON.stringify({ message: { payload: { headers } } }),
+    stderr: "",
+  });
+}
+
+function mockGogFailure() {
+  mockExecFileAsync.mockRejectedValue(new Error("gog not available"));
+}
 
 describe("gmail-transform", () => {
   const baseCtx = {
@@ -14,6 +39,10 @@ describe("gmail-transform", () => {
     url: new URL("http://localhost/hooks/gmail"),
     path: "gmail",
   };
+
+  beforeEach(() => {
+    mockGogFailure();
+  });
 
   afterEach(() => {
     vi.clearAllMocks();
@@ -175,10 +204,17 @@ describe("gmail-transform", () => {
     expect(threadId).toBe("abc123def");
   });
 
-  it("uses root Reference as stable thread key for cross-domain threading", async () => {
-    // Simulates reply arriving with References from a cross-domain thread
-    // (e.g., Superhuman → SES). Gmail assigns a new threadId but References
-    // preserves the real chain.
+  it("resolves cross-domain thread via In-Reply-To and message-ID index", async () => {
+    // Scenario: user replies from Superhuman, Gmail assigns new threadId.
+    // gog fetches In-Reply-To pointing to our SES reply.
+    // resolveThreadKeyByMessageId finds the original thread key.
+    mockGogHeaders([
+      { name: "Message-ID", value: "<reply2@superhuman.com>" },
+      { name: "In-Reply-To", value: "<ses-reply@amazonses.com>" },
+      { name: "References", value: "<ses-reply@amazonses.com>" },
+    ]);
+    vi.mocked(resolveThreadKeyByMessageId).mockResolvedValueOnce("original-thread-key");
+
     const result = await transform({
       ...baseCtx,
       payload: {
@@ -187,30 +223,31 @@ describe("gmail-transform", () => {
             id: "msg3",
             threadId: "new-gmail-thread",
             from: "user@example.com",
+            to: "agent@test.com",
             subject: "Re: Original subject",
             body: "Follow-up message",
-            messageId: "<reply2@superhuman.com>",
-            references: "<root@superhuman.com> <ses-reply@amazonses.com>",
           },
         ],
       },
     });
 
-    // Thread key should be the root Message-ID, not Gmail's threadId
-    expect(result!.sessionKey).toBe("email:thread:<root@superhuman.com>");
-    expect(result!.to).toBe("user@example.com##<root@superhuman.com>");
+    expect(resolveThreadKeyByMessageId).toHaveBeenCalledWith("<ses-reply@amazonses.com>");
+    expect(result!.sessionKey).toBe("email:thread:original-thread-key");
+    expect(result!.to).toBe("user@example.com##original-thread-key");
 
     // Delivery context stores Gmail's threadId for API use
-    expect(writeDeliveryContext).toHaveBeenCalledWith("<root@superhuman.com>", {
+    expect(writeDeliveryContext).toHaveBeenCalledWith("original-thread-key", {
       threadId: "new-gmail-thread",
       messageId: "<reply2@superhuman.com>",
       subject: "Re: Original subject",
-      references: "<root@superhuman.com> <ses-reply@amazonses.com>",
+      references: "<ses-reply@amazonses.com>",
       from: "user@example.com",
     });
   });
 
-  it("uses messageId as thread key for first message (no References)", async () => {
+  it("uses messageId from gog as thread key for first message", async () => {
+    mockGogHeaders([{ name: "Message-ID", value: "<first@superhuman.com>" }]);
+
     const result = await transform({
       ...baseCtx,
       payload: {
@@ -221,14 +258,38 @@ describe("gmail-transform", () => {
             from: "user@example.com",
             subject: "New thread",
             body: "First message",
-            messageId: "<first@superhuman.com>",
           },
         ],
       },
     });
 
-    // First message: no references, so use messageId as thread key
+    // First message: no In-Reply-To, so use messageId as thread key
     expect(result!.sessionKey).toBe("email:thread:<first@superhuman.com>");
     expect(result!.to).toBe("user@example.com##<first@superhuman.com>");
+  });
+
+  it("passes account to gog when msg.to is present", async () => {
+    mockGogHeaders([]);
+
+    await transform({
+      ...baseCtx,
+      payload: {
+        messages: [
+          {
+            id: "msg1",
+            threadId: "t1",
+            from: "sender@example.com",
+            to: "Agent <agent@test.com>",
+            body: "Test",
+          },
+        ],
+      },
+    });
+
+    // Verify gog was called with --account agent@test.com
+    // mockExecFileAsync receives ("gog", argsArray, opts)
+    const gogArgs = mockExecFileAsync.mock.calls[0][1] as string[];
+    expect(gogArgs).toContain("--account");
+    expect(gogArgs).toContain("agent@test.com");
   });
 });

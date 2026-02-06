@@ -141,6 +141,7 @@ export async function runCronIsolatedAgentTurn(params: {
     agentId,
     mainKey: baseSessionKey,
   });
+  const reuseExistingSession = !baseSessionKey.startsWith("cron:");
 
   const workspaceDirRaw = resolveAgentWorkspaceDir(params.cfg, agentId);
   const agentDir = resolveAgentDir(params.cfg, agentId);
@@ -210,6 +211,7 @@ export async function runCronIsolatedAgentTurn(params: {
     sessionKey: agentSessionKey,
     agentId,
     nowMs: now,
+    reuseExistingSession,
   });
 
   // Resolve thinking level - job thinking > hooks.gmail.thinking > agent default

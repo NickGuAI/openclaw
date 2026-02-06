@@ -2,7 +2,11 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { randomBytes } from "node:crypto";
 import type { GmailCredentials } from "./gmail-auth.js";
 import type { EmailGmailChannelConfig } from "./types.js";
-import { readDeliveryContext, updateDeliveryContextMessageId } from "./delivery-context.js";
+import {
+  readDeliveryContext,
+  updateDeliveryContextMessageId,
+  writeMessageIdIndex,
+} from "./delivery-context.js";
 import { buildSubject, markdownToHtml, wrapHtmlEmail } from "./format.js";
 import { refreshGmailAccessToken, resolveGmailCredentials } from "./gmail-auth.js";
 import { buildRawMimeMessage } from "./mime.js";
@@ -154,6 +158,8 @@ export async function sendEmailGmail(params: SendEmailGmailParams): Promise<Send
 
   if (threadId) {
     await updateDeliveryContextMessageId(threadId, messageId);
+    // Index outbound Message-ID → threadKey so inbound replies can resolve
+    await writeMessageIdIndex(messageId, threadId);
   }
 
   return {

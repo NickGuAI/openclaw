@@ -7,6 +7,7 @@ export function resolveCronSession(params: {
   sessionKey: string;
   nowMs: number;
   agentId: string;
+  reuseExistingSession?: boolean;
 }) {
   const sessionCfg = params.cfg.session;
   const storePath = resolveStorePath(sessionCfg?.store, {
@@ -14,8 +15,13 @@ export function resolveCronSession(params: {
   });
   const store = loadSessionStore(storePath);
   const entry = store[params.sessionKey];
-  const sessionId = crypto.randomUUID();
-  const systemSent = false;
+  const existingSessionId =
+    typeof entry?.sessionId === "string" && entry.sessionId.trim().length > 0
+      ? entry.sessionId.trim()
+      : undefined;
+  const shouldReuse = params.reuseExistingSession === true && !!existingSessionId;
+  const sessionId = shouldReuse ? (existingSessionId as string) : crypto.randomUUID();
+  const systemSent = shouldReuse ? entry?.systemSent === true : false;
   const sessionEntry: SessionEntry = {
     sessionId,
     updatedAt: params.nowMs,
@@ -30,5 +36,5 @@ export function resolveCronSession(params: {
     lastAccountId: entry?.lastAccountId,
     skillsSnapshot: entry?.skillsSnapshot,
   };
-  return { storePath, store, sessionEntry, systemSent, isNewSession: true };
+  return { storePath, store, sessionEntry, systemSent, isNewSession: !shouldReuse };
 }

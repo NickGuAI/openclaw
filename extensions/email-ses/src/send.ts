@@ -1,9 +1,13 @@
-import { SESClient, SendRawEmailCommand } from "@aws-sdk/client-ses";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { readDeliveryContext, updateDeliveryContextMessageId } from "./delivery-context.js";
+import { SESClient, SendRawEmailCommand } from "@aws-sdk/client-ses";
+import type { EmailSesChannelConfig } from "./types.js";
+import {
+  readDeliveryContext,
+  updateDeliveryContextMessageId,
+  writeMessageIdIndex,
+} from "./delivery-context.js";
 import { buildSubject, markdownToHtml, wrapHtmlEmail } from "./format.js";
 import { buildRawMimeMessage } from "./mime.js";
-import type { EmailSesChannelConfig } from "./types.js";
 
 export type SendEmailSesParams = {
   cfg: OpenClawConfig;
@@ -91,8 +95,11 @@ export async function sendEmailSes(params: SendEmailSesParams): Promise<SendEmai
   const messageId = response.MessageId || "unknown";
 
   // Update delivery context with new message ID for threading chain
+  const fullMessageId = `<${messageId}@email.amazonses.com>`;
   if (threadId) {
-    await updateDeliveryContextMessageId(threadId, `<${messageId}@email.amazonses.com>`);
+    await updateDeliveryContextMessageId(threadId, fullMessageId);
+    // Index outbound Message-ID → threadKey so inbound replies can resolve
+    await writeMessageIdIndex(fullMessageId, threadId);
   }
 
   return {
