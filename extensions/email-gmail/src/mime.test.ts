@@ -76,6 +76,21 @@ describe("buildRawMimeMessage", () => {
     expect(msg).toContain("Message-ID: <custom-id@test.com>");
   });
 
+  it("correctly encodes emoji in body text", () => {
+    const msg = buildRawMimeMessage({
+      from: "agent@test.com",
+      to: "user@example.com",
+      subject: "Test",
+      textBody: "Hey! \u{1F3AF}",
+      htmlBody: "<p>Hey! \u{1F3AF}</p>",
+    });
+
+    // U+1F3AF = F0 9F 8E AF in UTF-8 → =F0=9F=8E=AF in quoted-printable
+    expect(msg).toContain("=F0=9F=8E=AF");
+    // Must NOT contain replacement character U+FFFD (=EF=BF=BD)
+    expect(msg).not.toContain("=EF=BF=BD");
+  });
+
   it("generates unique boundary for each call", () => {
     const msg1 = buildRawMimeMessage({
       from: "a@b.com",

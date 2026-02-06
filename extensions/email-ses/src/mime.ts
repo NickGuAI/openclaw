@@ -54,7 +54,7 @@ export function buildRawMimeMessage(params: MimeMessageParams): string {
 }
 
 function encodeQuotedPrintable(text: string): string {
-  return text.replace(/[^\t\n\r\x20-\x7e]/g, (char) => {
+  return text.replace(/[^\t\n\r\x20-\x7e]/gu, (char) => {
     const bytes = Buffer.from(char, "utf-8");
     return Array.from(bytes)
       .map((b) => `=${b.toString(16).toUpperCase().padStart(2, "0")}`)
