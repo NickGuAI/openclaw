@@ -1,0 +1,32 @@
+{
+  "name": "@openclaw/email-gmail",
+  "version": "2026.1.30",
+  "description": "OpenClaw Email channel plugin (Gmail API)",
+  "type": "module",
+  "dependencies": {},
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "channel": {
+      "id": "email-gmail",
+      "label": "Email (Gmail)",
+      "selectionLabel": "Email via Gmail API",
+      "docsPath": "/channels/email-gmail",
+      "docsLabel": "email-gmail",
+      "blurb": "Send email replies via Gmail API",
+      "aliases": [
+        "gmail-send"
+      ],
+      "order": 81
+    },
+    "install": {
+      "npmSpec": "@openclaw/email-gmail",
+      "localPath": "extensions/email-gmail",
+      "defaultChoice": "npm"
+    }
+  }
+}
