@@ -72,7 +72,7 @@ describe("sendEmailGmail", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("parses email##threadId format and includes threadId in request", async () => {
+  it("parses email##threadKey format and uses deliveryCtx.threadId for Gmail API", async () => {
     vi.mocked(resolveGmailCredentials).mockResolvedValue({
       clientId: "cid",
       clientSecret: "secret",
@@ -81,8 +81,10 @@ describe("sendEmailGmail", () => {
       expiresAt: Date.now() + 60_000,
     });
 
+    // Thread key in `to` is a Message-ID (from References-based threading),
+    // but delivery context stores the real Gmail threadId for API calls.
     vi.mocked(readDeliveryContext).mockResolvedValueOnce({
-      threadId: "thread123",
+      threadId: "gmail-thread-abc",
       subject: "Test Subject",
       messageId: "<original@gmail.com>",
       from: "User <user@example.com>",
@@ -91,28 +93,29 @@ describe("sendEmailGmail", () => {
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ id: "gmail-msg-456", threadId: "thread123" }),
+      json: async () => ({ id: "gmail-msg-456", threadId: "gmail-thread-abc" }),
       text: async () => "",
     });
 
     const result = await sendEmailGmail({
       cfg: baseCfg,
-      to: "user@example.com##thread123",
+      to: "user@example.com##<root@superhuman.com>",
       text: "Reply text",
     });
 
     expect(result.conversationId).toBe("user@example.com");
-    expect(readDeliveryContext).toHaveBeenCalledWith("thread123");
+    expect(readDeliveryContext).toHaveBeenCalledWith("<root@superhuman.com>");
 
     const call = fetchMock.mock.calls[0];
     const body = JSON.parse(call[1].body as string) as { raw: string; threadId?: string };
-    expect(body.threadId).toBe("thread123");
+    // Gmail API gets the real Gmail threadId, not the Message-ID thread key
+    expect(body.threadId).toBe("gmail-thread-abc");
 
     const decoded = decodeBase64Url(body.raw);
     expect(decoded).toContain("In-Reply-To: <original@gmail.com>");
 
     expect(updateDeliveryContextMessageId).toHaveBeenCalledWith(
-      "thread123",
+      "<root@superhuman.com>",
       expect.stringContaining("@openclaw.email"),
     );
   });

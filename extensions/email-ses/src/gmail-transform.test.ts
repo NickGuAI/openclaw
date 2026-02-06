@@ -174,4 +174,61 @@ describe("gmail-transform", () => {
     expect(email).toBe("user@domain.com");
     expect(threadId).toBe("abc123def");
   });
+
+  it("uses root Reference as stable thread key for cross-domain threading", async () => {
+    // Simulates reply arriving with References from a cross-domain thread
+    // (e.g., Superhuman → SES). Gmail assigns a new threadId but References
+    // preserves the real chain.
+    const result = await transform({
+      ...baseCtx,
+      payload: {
+        messages: [
+          {
+            id: "msg3",
+            threadId: "new-gmail-thread",
+            from: "user@example.com",
+            subject: "Re: Original subject",
+            body: "Follow-up message",
+            messageId: "<reply2@superhuman.com>",
+            references: "<root@superhuman.com> <ses-reply@amazonses.com>",
+          },
+        ],
+      },
+    });
+
+    // Thread key should be the root Message-ID, not Gmail's threadId
+    expect(result!.sessionKey).toBe("email:thread:<root@superhuman.com>");
+    expect(result!.to).toBe("user@example.com##<root@superhuman.com>");
+
+    // Delivery context stores Gmail's threadId for API use
+    expect(writeDeliveryContext).toHaveBeenCalledWith("<root@superhuman.com>", {
+      threadId: "new-gmail-thread",
+      messageId: "<reply2@superhuman.com>",
+      subject: "Re: Original subject",
+      references: "<root@superhuman.com> <ses-reply@amazonses.com>",
+      from: "user@example.com",
+    });
+  });
+
+  it("uses messageId as thread key for first message (no References)", async () => {
+    const result = await transform({
+      ...baseCtx,
+      payload: {
+        messages: [
+          {
+            id: "msg1",
+            threadId: "gmail-t1",
+            from: "user@example.com",
+            subject: "New thread",
+            body: "First message",
+            messageId: "<first@superhuman.com>",
+          },
+        ],
+      },
+    });
+
+    // First message: no references, so use messageId as thread key
+    expect(result!.sessionKey).toBe("email:thread:<first@superhuman.com>");
+    expect(result!.to).toBe("user@example.com##<first@superhuman.com>");
+  });
 });

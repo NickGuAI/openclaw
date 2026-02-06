@@ -131,8 +131,10 @@ export async function sendEmailGmail(params: SendEmailGmailParams): Promise<Send
   const payload: Record<string, unknown> = {
     raw: base64UrlEncode(rawMessage),
   };
-  if (threadId) {
-    payload.threadId = threadId;
+  // Use Gmail's native threadId from delivery context for the API call,
+  // not the parsed thread key (which may be an RFC 2822 Message-ID).
+  if (deliveryCtx?.threadId) {
+    payload.threadId = deliveryCtx.threadId;
   }
 
   let response = await sendWithToken(accessToken, payload);
