@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { EmailDeliveryContext } from "./types.js";
+import type { EmailDeliveryContext } from "./types.ts";
 
 function getContextsDir(): string {
   return join(homedir(), ".openclaw", "email-ses", "contexts");
@@ -22,9 +22,7 @@ export async function writeDeliveryContext(
   await writeFile(contextPath(threadId), JSON.stringify(ctx, null, 2), "utf-8");
 }
 
-export async function readDeliveryContext(
-  threadId: string,
-): Promise<EmailDeliveryContext | null> {
+export async function readDeliveryContext(threadId: string): Promise<EmailDeliveryContext | null> {
   try {
     const data = await readFile(contextPath(threadId), "utf-8");
     return JSON.parse(data) as EmailDeliveryContext;

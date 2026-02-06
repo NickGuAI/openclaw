@@ -176,6 +176,17 @@
 - For manual `openclaw message send` messages that include `!`, use the heredoc pattern noted below to avoid the Bash tool’s escaping.
 - Release guardrails: do not change version numbers without operator’s explicit consent; always ask permission before running any npm publish/release step.
 
+## gog (Google Workspace CLI)
+
+- **gog is NOT the npm package `gog`** (https://github.com/kublikon/gog). That is a useless generic shell script manager. NEVER run `npm install -g gog`.
+- **gog IS gogcli** (https://github.com/steipete/gogcli) — a Go binary for Gmail, Calendar, Drive, Contacts, Sheets, Docs.
+- Install: download the Linux amd64 binary from GitHub releases and place in `~/.local/bin/gog`. On macOS: `brew install steipete/tap/gogcli`.
+- Verify: `gog --version` should print `v0.9.0` or later, NOT `gog@0.0.12`.
+- gog is also listed as a bundled OpenClaw skill. Check status: `openclaw skills` (should show `✓ ready` for gog).
+- The gateway spawns `gog gmail watch serve` to bridge Gmail Pub/Sub push notifications to the hooks endpoint. If gog is missing or the wrong binary, the gmail-watcher will crash-loop every 5 seconds.
+- gog needs OAuth credentials for Gmail API access. Credentials live at `~/.openclaw/gog/` or are configured via `gog auth`.
+- Gmail watch expires every 7 days; the gateway auto-renews via `hooks.gmail.renewEveryMinutes`.
+
 ## NPM + 1Password (publish/verify)
 
 - Use the 1password skill; all `op` commands must run inside a fresh tmux session.

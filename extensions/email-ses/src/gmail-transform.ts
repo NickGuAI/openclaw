@@ -1,5 +1,5 @@
-import { writeDeliveryContext } from "./delivery-context.js";
-import { stripQuotedReply } from "./strip-quotes.js";
+import { writeDeliveryContext } from "./delivery-context.ts";
+import { stripQuotedReply } from "./strip-quotes.ts";
 
 type GmailMessage = {
   id: string;
@@ -14,7 +14,17 @@ type GmailMessage = {
   labels?: string[];
   messageId?: string;
   references?: string;
+  inReplyTo?: string;
 };
+
+// Extract the first Message-ID from a References header.
+// In a thread, the first reference is the root message — stable across
+// all replies regardless of SMTP domain (Superhuman, SES, Gmail, etc.).
+function extractRootReference(references?: string): string | undefined {
+  if (!references) return undefined;
+  const match = references.match(/<[^>]+>/);
+  return match ? match[0] : undefined;
+}
 
 function extractEmail(from: string): string {
   // Extract email from "Name <email@example.com>" or plain "email@example.com"
@@ -55,13 +65,16 @@ export default async function transform(ctx: {
   const body = msg.body || msg.snippet || "";
   const strippedBody = stripQuotedReply(body);
 
-  // threadId: confirmed available in gog payload (from Gmail API msg.ThreadId)
-  // messageId (RFC 2822 Message-ID), references: NOT in gog payload yet
-  const threadId = msg.threadId || msg.id;
+  // Use first Message-ID from References as stable thread key.
+  // Gmail may assign different threadIds when messages cross SMTP domains
+  // (e.g. Superhuman → SES), but References preserves the real chain.
+  const rootRef = extractRootReference(msg.references);
+  const threadKey = rootRef || msg.messageId || msg.threadId || msg.id;
+  const gmailThreadId = msg.threadId || msg.id;
 
   // Persist delivery context for use by the send function
-  await writeDeliveryContext(threadId, {
-    threadId,
+  await writeDeliveryContext(threadKey, {
+    threadId: gmailThreadId,
     messageId: msg.messageId,
     subject: msg.subject,
     references: msg.references,
@@ -70,12 +83,12 @@ export default async function transform(ctx: {
 
   return {
     kind: "agent",
-    sessionKey: `email:thread:${threadId}`,
+    sessionKey: `email:thread:${threadKey}`,
     message: formatEmailMessage({ from: msg.from, subject: msg.subject, body: strippedBody }),
     name: "Email",
     deliver: true,
     channel: "email-ses",
-    to: `${senderEmail}##${threadId}`,
+    to: `${senderEmail}##${threadKey}`,
     wakeMode: "now",
   };
 }
