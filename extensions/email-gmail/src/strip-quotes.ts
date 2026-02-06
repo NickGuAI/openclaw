@@ -15,8 +15,16 @@ export function stripQuotedReply(body: string): string {
 
   const lines = text.split("\n");
   let cutIndex = lines.length;
+  const forwardedStartIndex = lines.findIndex((line) =>
+    /^-{5,}\s*Forwarded message\s*-{5,}/.test(line.trim()),
+  );
 
   for (let i = 0; i < lines.length; i++) {
+    // Keep the full forwarded block once it begins.
+    if (forwardedStartIndex >= 0 && i >= forwardedStartIndex) {
+      break;
+    }
+
     const line = lines[i].trim();
 
     // Gmail: "On <date>, <name> wrote:" or "On <date> at <time> <name> wrote:"
@@ -27,12 +35,6 @@ export function stripQuotedReply(body: string): string {
 
     // Outlook separator
     if (/^_{5,}/.test(line)) {
-      cutIndex = i;
-      break;
-    }
-
-    // Forwarded message
-    if (/^-{5,}\s*Forwarded message\s*-{5,}/.test(line)) {
       cutIndex = i;
       break;
     }

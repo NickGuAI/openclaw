@@ -15,8 +15,16 @@ export function stripQuotedReply(body: string): string {
 
   const lines = text.split("\n");
   let cutIndex = lines.length;
+  const forwardedStartIndex = lines.findIndex((line) =>
+    /^-{5,}\s*Forwarded message\s*-{5,}/.test(line.trim()),
+  );
 
   for (let i = 0; i < lines.length; i++) {
+    // Keep the full forwarded block once it begins.
+    if (forwardedStartIndex >= 0 && i >= forwardedStartIndex) {
+      break;
+    }
+
     const line = lines[i].trim();
 
     // Gmail: "On <date>, <name> wrote:" or "On <date> at <time> <name> wrote:"
@@ -31,12 +39,6 @@ export function stripQuotedReply(body: string): string {
       break;
     }
 
-    // Forwarded message
-    if (/^-{5,}\s*Forwarded message\s*-{5,}/.test(line)) {
-      cutIndex = i;
-      break;
-    }
-
     // Standard signature delimiter (exactly "-- " on its own line)
     if (line === "--") {
       cutIndex = i;
@@ -45,9 +47,7 @@ export function stripQuotedReply(body: string): string {
 
     // Outlook-style "From: ... Sent: ... To: ... Subject: ..." block
     if (/^From:\s/.test(line) && i + 3 < lines.length) {
-      const nextLines = lines
-        .slice(i + 1, i + 4)
-        .map((l) => l.trim());
+      const nextLines = lines.slice(i + 1, i + 4).map((l) => l.trim());
       if (nextLines.some((l) => /^Sent:\s/.test(l)) && nextLines.some((l) => /^To:\s/.test(l))) {
         cutIndex = i;
         break;

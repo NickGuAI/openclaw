@@ -42,15 +42,20 @@ CEO, Example Corp`;
     expect(stripQuotedReply(body)).toBe("Here is my reply.");
   });
 
-  it("strips forwarded message header", () => {
+  it("preserves forwarded message body", () => {
     const body = `FYI see below.
 
 ---------- Forwarded message ----------
 From: someone@example.com
-Date: Mon, Jan 1, 2026
-Subject: Original`;
+Sent: Monday, January 1, 2026 10:00 AM
+To: me@example.com
+Subject: Original
 
-    expect(stripQuotedReply(body)).toBe("FYI see below.");
+This is the forwarded content.`;
+
+    const result = stripQuotedReply(body);
+    expect(result).toContain("FYI see below.");
+    expect(result).toContain("This is the forwarded content.");
   });
 
   it("strips Outlook From/Sent/To block", () => {
