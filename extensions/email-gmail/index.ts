@@ -7,7 +7,7 @@ const plugin = {
   id: "email-gmail",
   name: "Email (Gmail)",
   description: "Email channel plugin via Gmail API",
-  configSchema: emptyPluginConfigSchema(),
+  configSchema: emailGmailPlugin.configSchema ?? emptyPluginConfigSchema(),
   register(api: OpenClawPluginApi) {
     setEmailGmailRuntime(api.runtime);
     api.registerChannel({ plugin: emailGmailPlugin });

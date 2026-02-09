@@ -1,7 +1,8 @@
 import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk";
-import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk";
-import { emailSesOutbound } from "./outbound.js";
+import { buildChannelConfigSchema, DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk";
 import type { EmailSesChannelConfig, ResolvedEmailSesAccount } from "./types.js";
+import { EmailSesConfigSchema } from "./config-schema.js";
+import { emailSesOutbound } from "./outbound.js";
 
 function resolveEmailSesConfig(cfg: OpenClawConfig): EmailSesChannelConfig | undefined {
   return (cfg.channels as Record<string, unknown> | undefined)?.["email-ses"] as
@@ -38,6 +39,7 @@ export const emailSesPlugin: ChannelPlugin<ResolvedEmailSesAccount> = {
   },
 
   reload: { configPrefixes: ["channels.email-ses"] },
+  configSchema: buildChannelConfigSchema(EmailSesConfigSchema),
 
   config: {
     listAccountIds: () => [DEFAULT_ACCOUNT_ID],

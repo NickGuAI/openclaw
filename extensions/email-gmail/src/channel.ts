@@ -1,6 +1,7 @@
 import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk";
-import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk";
+import { buildChannelConfigSchema, DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk";
 import type { EmailGmailChannelConfig, ResolvedEmailGmailAccount } from "./types.js";
+import { EmailGmailConfigSchema } from "./config-schema.js";
 import { resolveGmailCredentials } from "./gmail-auth.js";
 import { emailGmailOutbound } from "./outbound.js";
 
@@ -62,6 +63,7 @@ export const emailGmailPlugin: ChannelPlugin<ResolvedEmailGmailAccount> = {
   },
 
   reload: { configPrefixes: ["channels.email-gmail"] },
+  configSchema: buildChannelConfigSchema(EmailGmailConfigSchema),
 
   config: {
     listAccountIds: () => [DEFAULT_ACCOUNT_ID],

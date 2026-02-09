@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { loadConfig, readChannelAllowFromStore } from "openclaw/plugin-sdk";
 import { resolveThreadKeyByMessageId, writeDeliveryContext } from "./delivery-context.ts";
 import { stripQuotedReply } from "./strip-quotes.ts";
 
@@ -39,7 +40,9 @@ async function fetchMessageHeaders(msgId: string, account?: string): Promise<Ema
       "--headers=References,Message-Id,In-Reply-To",
       "--json",
     ];
-    if (account) args.push("--account", account);
+    if (account) {
+      args.push("--account", account);
+    }
     const { stdout } = await execFileAsync("gog", args, {
       timeout: 5000,
       env: { ...process.env },
@@ -48,12 +51,20 @@ async function fetchMessageHeaders(msgId: string, account?: string): Promise<Ema
     const headers = data.message?.payload?.headers as
       | Array<{ name: string; value: string }>
       | undefined;
-    if (!headers) return {};
+    if (!headers) {
+      return {};
+    }
     const result: EmailHeaders = {};
     for (const h of headers) {
-      if (h.name === "Message-ID" || h.name === "Message-Id") result.messageId = h.value;
-      if (h.name === "References") result.references = h.value;
-      if (h.name === "In-Reply-To") result.inReplyTo = h.value;
+      if (h.name === "Message-ID" || h.name === "Message-Id") {
+        result.messageId = h.value;
+      }
+      if (h.name === "References") {
+        result.references = h.value;
+      }
+      if (h.name === "In-Reply-To") {
+        result.inReplyTo = h.value;
+      }
     }
     return result;
   } catch {
@@ -77,6 +88,10 @@ function formatEmailMessage(params: { from: string; subject?: string; body: stri
   return parts.join("\n");
 }
 
+function normalizeAllowEntry(entry: unknown): string {
+  return String(entry).trim().toLowerCase();
+}
+
 /**
  * Hook transform: Gmail webhook payload → email agent session.
  *
@@ -96,6 +111,27 @@ export default async function transform(ctx: {
   }
 
   const senderEmail = extractEmail(msg.from);
+  const normalizedSender = senderEmail.trim().toLowerCase();
+
+  const cfg = loadConfig();
+  const channelCfg = (cfg.channels as Record<string, unknown> | undefined)?.["email-ses"] as
+    | { allowFrom?: unknown[] }
+    | undefined;
+  const configAllowFrom = (channelCfg?.allowFrom ?? [])
+    .map((entry) => normalizeAllowEntry(entry))
+    .filter(Boolean);
+  const storeAllowFrom = (await readChannelAllowFromStore("email-ses").catch(() => []))
+    .map((entry) => normalizeAllowEntry(entry))
+    .filter(Boolean);
+  const combinedAllowFrom = [...new Set([...configAllowFrom, ...storeAllowFrom])];
+  if (
+    combinedAllowFrom.length > 0 &&
+    !combinedAllowFrom.includes("*") &&
+    !combinedAllowFrom.includes(normalizedSender)
+  ) {
+    return null;
+  }
+
   const body = msg.body || msg.snippet || "";
   const strippedBody = stripQuotedReply(body);
 

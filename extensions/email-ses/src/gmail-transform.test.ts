@@ -2,15 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock execFile with custom promisify support so promisify(execFile) returns our mock.
 // Node's promisify uses Symbol.for('nodejs.util.promisify.custom') for execFile.
-const { mockExecFileAsync } = vi.hoisted(() => ({
+const { loadConfigMock, mockExecFileAsync, readAllowFromStoreMock } = vi.hoisted(() => ({
+  loadConfigMock: vi.fn(),
   mockExecFileAsync: vi.fn(),
+  readAllowFromStoreMock: vi.fn(),
 }));
 
 vi.mock("node:child_process", () => {
-  const fn = (() => {}) as any;
+  const fn = (() => {}) as ((...args: unknown[]) => void) & Record<symbol, unknown>;
   fn[Symbol.for("nodejs.util.promisify.custom")] = mockExecFileAsync;
   return { execFile: fn };
 });
+
+vi.mock("openclaw/plugin-sdk", () => ({
+  loadConfig: loadConfigMock,
+  readChannelAllowFromStore: readAllowFromStoreMock,
+}));
 
 // Mock delivery-context
 vi.mock("./delivery-context.js", () => ({
@@ -41,6 +48,8 @@ describe("gmail-transform", () => {
   };
 
   beforeEach(() => {
+    loadConfigMock.mockReturnValue({});
+    readAllowFromStoreMock.mockResolvedValue([]);
     mockGogFailure();
   });
 
@@ -56,6 +65,112 @@ describe("gmail-transform", () => {
   it("returns null when messages array is empty", async () => {
     const result = await transform({ ...baseCtx, payload: { messages: [] } });
     expect(result).toBeNull();
+  });
+
+  it("allows sender in config allowFrom", async () => {
+    loadConfigMock.mockReturnValue({
+      channels: {
+        "email-ses": {
+          allowFrom: ["allowed@example.com"],
+        },
+      },
+    });
+
+    const result = await transform({
+      ...baseCtx,
+      payload: {
+        messages: [
+          {
+            id: "msg-allow",
+            threadId: "thread-allow",
+            from: "Allowed User <allowed@example.com>",
+            body: "Hi",
+          },
+        ],
+      },
+    });
+
+    expect(result).not.toBeNull();
+  });
+
+  it("returns null when sender is not in allowFrom", async () => {
+    loadConfigMock.mockReturnValue({
+      channels: {
+        "email-ses": {
+          allowFrom: ["allowed@example.com"],
+        },
+      },
+    });
+
+    const result = await transform({
+      ...baseCtx,
+      payload: {
+        messages: [
+          {
+            id: "msg-blocked",
+            threadId: "thread-blocked",
+            from: "blocked@example.com",
+            body: "Hi",
+          },
+        ],
+      },
+    });
+
+    expect(result).toBeNull();
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+    expect(writeDeliveryContext).not.toHaveBeenCalled();
+  });
+
+  it("allows all senders when allowFrom is empty", async () => {
+    loadConfigMock.mockReturnValue({
+      channels: {
+        "email-ses": {
+          allowFrom: [],
+        },
+      },
+    });
+
+    const result = await transform({
+      ...baseCtx,
+      payload: {
+        messages: [
+          {
+            id: "msg-open",
+            threadId: "thread-open",
+            from: "anyone@example.com",
+            body: "Hello",
+          },
+        ],
+      },
+    });
+
+    expect(result).not.toBeNull();
+  });
+
+  it("allows all senders when wildcard allowFrom is configured", async () => {
+    loadConfigMock.mockReturnValue({
+      channels: {
+        "email-ses": {
+          allowFrom: ["*"],
+        },
+      },
+    });
+
+    const result = await transform({
+      ...baseCtx,
+      payload: {
+        messages: [
+          {
+            id: "msg-wildcard",
+            threadId: "thread-wildcard",
+            from: "wildcard@example.com",
+            body: "Hello",
+          },
+        ],
+      },
+    });
+
+    expect(result).not.toBeNull();
   });
 
   it("transforms a Gmail message into agent session", async () => {

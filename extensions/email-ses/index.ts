@@ -7,7 +7,7 @@ const plugin = {
   id: "email-ses",
   name: "Email (AWS SES)",
   description: "Email channel plugin via AWS SES",
-  configSchema: emptyPluginConfigSchema(),
+  configSchema: emailSesPlugin.configSchema ?? emptyPluginConfigSchema(),
   register(api: OpenClawPluginApi) {
     setEmailSesRuntime(api.runtime);
     api.registerChannel({ plugin: emailSesPlugin });
