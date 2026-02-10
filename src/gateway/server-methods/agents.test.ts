@@ -36,7 +36,28 @@ vi.mock("../../agents/agent-scope.js", () => ({
       .map((entry) => (entry && typeof entry === "object" ? (entry as { id?: unknown }).id : null))
       .filter((id): id is string => typeof id === "string" && id.trim().length > 0);
   },
-  resolveAgentWorkspaceDir: (_cfg: unknown, agentId: string) => `/tmp/workspaces/${agentId}`,
+  resolveAgentWorkspaceDir: (
+    cfg: { agents?: { list?: unknown[]; defaults?: { workspace?: unknown } } },
+    agentId: string,
+  ) => {
+    const list = cfg?.agents?.list;
+    const defaultId = Array.isArray(list)
+      ? list
+          .map((entry) =>
+            entry && typeof entry === "object" ? (entry as { id?: unknown }).id : undefined,
+          )
+          .find((id): id is string => typeof id === "string" && id.trim().length > 0)
+      : undefined;
+    const defaultWorkspace = cfg?.agents?.defaults?.workspace;
+    if (
+      defaultId === agentId &&
+      typeof defaultWorkspace === "string" &&
+      defaultWorkspace.trim().length > 0
+    ) {
+      return defaultWorkspace.trim();
+    }
+    return `/tmp/workspaces/${agentId}`;
+  },
 }));
 
 function cloneJson<T>(value: T): T {
@@ -187,6 +208,48 @@ describe("agents.create", () => {
     expect(respond).toHaveBeenCalledWith(
       true,
       expect.objectContaining({ ok: true, agentId: "alpha" }),
+      undefined,
+    );
+  });
+
+  it("resolves workspace from effective config when parsed snapshot has placeholders", async () => {
+    const parsedConfig = {
+      agents: {
+        defaults: { workspace: "${HOME}/workspace-default" },
+        list: [],
+      },
+    };
+    const resolvedConfig = {
+      agents: {
+        defaults: { workspace: "/home/test/workspace-default" },
+        list: [],
+      },
+    };
+    const snapshot = makeSnapshot(resolvedConfig, {
+      parsed: parsedConfig,
+      hash: "hash-1",
+      raw: JSON.stringify(parsedConfig),
+    });
+
+    mocks.mkdir.mockResolvedValue(undefined);
+    mocks.loadConfig.mockImplementation(() => cloneJson(resolvedConfig));
+    mocks.readConfigFileSnapshot.mockImplementation(async () => cloneJson(snapshot));
+    mocks.resolveConfigSnapshotHash.mockImplementation((snap: { hash?: unknown }) =>
+      typeof snap.hash === "string" ? snap.hash : null,
+    );
+    mocks.writeConfigFile.mockResolvedValue(undefined);
+
+    const respond = vi.fn();
+    await callAgentsCreate("alpha", respond);
+
+    expect(mocks.mkdir).toHaveBeenCalledWith("/home/test/workspace-default", { recursive: true });
+    const written = mocks.writeConfigFile.mock.calls[0]?.[0] as {
+      agents?: { defaults?: { workspace?: string } };
+    };
+    expect(written.agents?.defaults?.workspace).toBe("${HOME}/workspace-default");
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ workspace: "/home/test/workspace-default" }),
       undefined,
     );
   });

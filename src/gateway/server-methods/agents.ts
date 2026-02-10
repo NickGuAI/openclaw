@@ -59,6 +59,22 @@ function runAgentsCreateSerialized<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+function addAgentListEntry(
+  cfg: OpenClawConfig,
+  params: {
+    agentId: string;
+    name: string;
+  },
+): OpenClawConfig {
+  const next = structuredClone(cfg);
+  const agents: NonNullable<OpenClawConfig["agents"]> = next.agents ? { ...next.agents } : {};
+  const list = Array.isArray(agents.list) ? [...agents.list] : [];
+  list.push(params.name ? { id: params.agentId, name: params.name } : { id: params.agentId });
+  agents.list = list;
+  next.agents = agents;
+  return next;
+}
+
 type FileMeta = {
   size: number;
   updatedAtMs: number;
@@ -222,18 +238,15 @@ export const agentsHandlers: GatewayRequestHandlers = {
         return;
       }
 
-      const nextConfig = structuredClone(
-        snapshot.parsed as Record<string, unknown>,
-      ) as OpenClawConfig;
-      const agents: NonNullable<OpenClawConfig["agents"]> = nextConfig.agents
-        ? { ...nextConfig.agents }
-        : {};
-      const list = Array.isArray(agents.list) ? [...agents.list] : [];
-      list.push(name ? { id: agentId, name } : { id: agentId });
-      agents.list = list;
-      nextConfig.agents = agents;
-
-      const workspaceDir = resolveAgentWorkspaceDir(nextConfig, agentId);
+      const nextConfig = addAgentListEntry(
+        structuredClone(snapshot.parsed as Record<string, unknown>) as OpenClawConfig,
+        {
+          agentId,
+          name,
+        },
+      );
+      const workspaceConfig = addAgentListEntry(snapshot.config, { agentId, name });
+      const workspaceDir = resolveAgentWorkspaceDir(workspaceConfig, agentId);
       await fs.mkdir(workspaceDir, { recursive: true });
 
       // Avoid overwriting unrelated config edits made while this request was in-flight.
