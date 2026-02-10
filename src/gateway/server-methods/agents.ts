@@ -13,7 +13,12 @@ import {
   DEFAULT_TOOLS_FILENAME,
   DEFAULT_USER_FILENAME,
 } from "../../agents/workspace.js";
-import { loadConfig, readConfigFileSnapshot, writeConfigFile } from "../../config/config.js";
+import {
+  loadConfig,
+  readConfigFileSnapshot,
+  resolveConfigSnapshotHash,
+  writeConfigFile,
+} from "../../config/config.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import {
   ErrorCodes,
@@ -164,6 +169,18 @@ export const agentsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    const snapshotHash = resolveConfigSnapshotHash(snapshot);
+    if (snapshot.exists && !snapshotHash) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "config base hash unavailable; re-run agents.create and retry",
+        ),
+      );
+      return;
+    }
 
     const cfg = loadConfig();
     const knownIds = new Set([...listAgentIds(cfg), ...listAgentIds(snapshot.config)]);
@@ -188,6 +205,61 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     const workspaceDir = resolveAgentWorkspaceDir(nextConfig, agentId);
     await fs.mkdir(workspaceDir, { recursive: true });
+
+    // Avoid overwriting unrelated config edits made while this request was in-flight.
+    const latestSnapshot = await readConfigFileSnapshot();
+    if (!latestSnapshot.valid) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "config invalid; fix it before creating agents"),
+      );
+      return;
+    }
+    const latestHash = resolveConfigSnapshotHash(latestSnapshot);
+    if (snapshot.exists && !latestHash) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "config base hash unavailable; re-run agents.create and retry",
+        ),
+      );
+      return;
+    }
+    if (!snapshot.exists && latestSnapshot.exists) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "config changed since request start; re-run agents.create and retry",
+        ),
+      );
+      return;
+    }
+    if (snapshot.exists && snapshotHash && latestHash && snapshotHash !== latestHash) {
+      const latestKnownIds = new Set(listAgentIds(latestSnapshot.config));
+      if (latestKnownIds.has(agentId)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `agent id already exists: ${agentId}`),
+        );
+        return;
+      }
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "config changed since request start; re-run agents.create and retry",
+        ),
+      );
+      return;
+    }
+
     await writeConfigFile(nextConfig);
     respond(true, { ok: true, agentId, workspace: workspaceDir }, undefined);
   },
