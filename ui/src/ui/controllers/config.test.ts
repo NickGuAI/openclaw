@@ -138,12 +138,12 @@ describe("updateConfigFormValue", () => {
 });
 
 describe("refreshConfigSnapshotHash", () => {
-  it("updates snapshot hash without clobbering dirty raw edits", async () => {
+  it("does not update snapshot hash while dirty, but keeps validity diagnostics fresh", async () => {
     const request = vi.fn().mockResolvedValue({
       hash: "new-hash",
       config: { gateway: { mode: "local", port: 18789 } },
-      valid: true,
-      issues: [],
+      valid: false,
+      issues: [{ path: "gateway.port", message: "invalid port" }],
       raw: '{ "gateway": { "mode": "local", "port": 18789 } }',
     });
     const state = createState();
@@ -162,10 +162,37 @@ describe("refreshConfigSnapshotHash", () => {
 
     await refreshConfigSnapshotHash(state);
 
-    expect(state.configSnapshot?.hash).toBe("new-hash");
+    expect(state.configSnapshot?.hash).toBe("old-hash");
+    expect(state.configValid).toBe(false);
+    expect(state.configIssues).toEqual([{ path: "gateway.port", message: "invalid port" }]);
     expect(state.configRaw).toBe(
       '{\n  // unsaved raw edit\n  gateway: { mode: "local", port: 18000 }\n}\n',
     );
+  });
+
+  it("updates snapshot hash when config is clean", async () => {
+    const request = vi.fn().mockResolvedValue({
+      hash: "new-hash",
+      config: { gateway: { mode: "local", port: 18789 } },
+      valid: true,
+      issues: [],
+      raw: '{ "gateway": { "mode": "local", "port": 18789 } }',
+    });
+    const state = createState();
+    state.connected = true;
+    state.client = { request } as unknown as ConfigState["client"];
+    state.configFormDirty = false;
+    state.configSnapshot = {
+      hash: "old-hash",
+      config: { gateway: { mode: "local", port: 18000 } },
+      valid: true,
+      issues: [],
+      raw: "{}",
+    };
+
+    await refreshConfigSnapshotHash(state);
+
+    expect(state.configSnapshot?.hash).toBe("new-hash");
   });
 });
 

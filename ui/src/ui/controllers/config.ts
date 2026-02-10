@@ -56,9 +56,14 @@ export async function refreshConfigSnapshotHash(state: ConfigState) {
   }
   try {
     const res = await state.client.request<ConfigSnapshot>("config.get", {});
-    state.configSnapshot = res;
-    state.configValid = typeof res.valid === "boolean" ? res.valid : state.configValid;
-    state.configIssues = Array.isArray(res.issues) ? res.issues : state.configIssues;
+    if (state.configFormDirty) {
+      // Keep the original base hash while edits are dirty so optimistic-lock checks still detect
+      // out-of-date saves instead of silently accepting stale local content.
+      state.configValid = typeof res.valid === "boolean" ? res.valid : state.configValid;
+      state.configIssues = Array.isArray(res.issues) ? res.issues : state.configIssues;
+      return;
+    }
+    applyConfigSnapshot(state, res);
   } catch (err) {
     state.lastError = String(err);
   }

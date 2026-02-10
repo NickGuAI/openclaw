@@ -51,18 +51,27 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
-function makeSnapshot(config: Record<string, unknown>) {
-  const raw = JSON.stringify(config);
+function makeSnapshot(
+  config: Record<string, unknown>,
+  options?: {
+    parsed?: Record<string, unknown>;
+    raw?: string;
+    hash?: string;
+  },
+) {
+  const parsed = options?.parsed ?? config;
+  const raw = options?.raw ?? JSON.stringify(parsed);
+  const hash = options?.hash ?? raw;
   return {
     exists: true,
     valid: true,
     config: cloneJson(config),
     raw,
-    hash: raw,
+    hash,
     issues: [],
     warnings: [],
     legacyIssues: [],
-    parsed: cloneJson(config),
+    parsed: cloneJson(parsed),
     path: "/tmp/config.json",
   };
 }
@@ -138,6 +147,46 @@ describe("agents.create", () => {
     expect(respondBeta).toHaveBeenCalledWith(
       true,
       expect.objectContaining({ ok: true, agentId: "beta" }),
+      undefined,
+    );
+  });
+
+  it("builds writes from parsed snapshot content so placeholders are preserved", async () => {
+    const parsedConfig = {
+      channels: { telegram: { botToken: "${TELEGRAM_BOT_TOKEN}" } },
+      agents: { list: [] },
+    };
+    const resolvedConfig = {
+      channels: { telegram: { botToken: "123456:resolved-token" } },
+      agents: { list: [] },
+    };
+    const snapshot = makeSnapshot(resolvedConfig, {
+      parsed: parsedConfig,
+      hash: "hash-1",
+      raw: JSON.stringify(parsedConfig),
+    });
+
+    mocks.mkdir.mockResolvedValue(undefined);
+    mocks.loadConfig.mockImplementation(() => cloneJson(resolvedConfig));
+    mocks.readConfigFileSnapshot.mockImplementation(async () => cloneJson(snapshot));
+    mocks.resolveConfigSnapshotHash.mockImplementation((snap: { hash?: unknown }) =>
+      typeof snap.hash === "string" ? snap.hash : null,
+    );
+    mocks.writeConfigFile.mockResolvedValue(undefined);
+
+    const respond = vi.fn();
+    await callAgentsCreate("alpha", respond);
+
+    expect(mocks.writeConfigFile).toHaveBeenCalledTimes(1);
+    const written = mocks.writeConfigFile.mock.calls[0]?.[0] as {
+      channels?: { telegram?: { botToken?: string } };
+      agents?: { list?: Array<{ id?: string }> };
+    };
+    expect(written.channels?.telegram?.botToken).toBe("${TELEGRAM_BOT_TOKEN}");
+    expect(written.agents?.list).toEqual([{ id: "alpha" }]);
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ ok: true, agentId: "alpha" }),
       undefined,
     );
   });

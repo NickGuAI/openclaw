@@ -15,6 +15,7 @@ import {
 } from "../../agents/workspace.js";
 import {
   loadConfig,
+  type OpenClawConfig,
   readConfigFileSnapshot,
   resolveConfigSnapshotHash,
   writeConfigFile,
@@ -208,8 +209,23 @@ export const agentsHandlers: GatewayRequestHandlers = {
         return;
       }
 
-      const nextConfig = { ...snapshot.config };
-      const agents: NonNullable<typeof nextConfig.agents> = nextConfig.agents
+      if (
+        !snapshot.parsed ||
+        typeof snapshot.parsed !== "object" ||
+        Array.isArray(snapshot.parsed)
+      ) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, "config invalid; fix it before creating agents"),
+        );
+        return;
+      }
+
+      const nextConfig = structuredClone(
+        snapshot.parsed as Record<string, unknown>,
+      ) as OpenClawConfig;
+      const agents: NonNullable<OpenClawConfig["agents"]> = nextConfig.agents
         ? { ...nextConfig.agents }
         : {};
       const list = Array.isArray(agents.list) ? [...agents.list] : [];
