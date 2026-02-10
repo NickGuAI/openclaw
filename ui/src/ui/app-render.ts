@@ -14,6 +14,7 @@ import {
   applyConfig,
   ConfigState,
   loadConfig,
+  refreshConfigSnapshotHash,
   runUpdate,
   saveConfig,
   updateConfigFormValue,
@@ -446,6 +447,7 @@ export function renderApp(state: AppViewState) {
                           );
                         }
                       }
+                      await refreshConfigSnapshotHash(state as unknown as ConfigState);
                     } else {
                       await loadConfig(state as unknown as ConfigState);
                     }

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyConfigSnapshot,
   applyConfig,
+  refreshConfigSnapshotHash,
   runUpdate,
   updateConfigFormValue,
   type ConfigState,
@@ -132,6 +133,38 @@ describe("updateConfigFormValue", () => {
 
     expect(state.configRaw).toBe(
       '{\n  "gateway": {\n    "mode": "local",\n    "port": 18789\n  }\n}\n',
+    );
+  });
+});
+
+describe("refreshConfigSnapshotHash", () => {
+  it("updates snapshot hash without clobbering dirty raw edits", async () => {
+    const request = vi.fn().mockResolvedValue({
+      hash: "new-hash",
+      config: { gateway: { mode: "local", port: 18789 } },
+      valid: true,
+      issues: [],
+      raw: '{ "gateway": { "mode": "local", "port": 18789 } }',
+    });
+    const state = createState();
+    state.connected = true;
+    state.client = { request } as unknown as ConfigState["client"];
+    state.configFormDirty = true;
+    state.configFormMode = "raw";
+    state.configRaw = '{\n  // unsaved raw edit\n  gateway: { mode: "local", port: 18000 }\n}\n';
+    state.configSnapshot = {
+      hash: "old-hash",
+      config: { gateway: { mode: "local", port: 18000 } },
+      valid: true,
+      issues: [],
+      raw: "{}",
+    };
+
+    await refreshConfigSnapshotHash(state);
+
+    expect(state.configSnapshot?.hash).toBe("new-hash");
+    expect(state.configRaw).toBe(
+      '{\n  // unsaved raw edit\n  gateway: { mode: "local", port: 18000 }\n}\n',
     );
   });
 });

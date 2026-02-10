@@ -50,6 +50,20 @@ export async function loadConfig(state: ConfigState) {
   }
 }
 
+export async function refreshConfigSnapshotHash(state: ConfigState) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  try {
+    const res = await state.client.request<ConfigSnapshot>("config.get", {});
+    state.configSnapshot = res;
+    state.configValid = typeof res.valid === "boolean" ? res.valid : state.configValid;
+    state.configIssues = Array.isArray(res.issues) ? res.issues : state.configIssues;
+  } catch (err) {
+    state.lastError = String(err);
+  }
+}
+
 export async function loadConfigSchema(state: ConfigState) {
   if (!state.client || !state.connected) {
     return;
