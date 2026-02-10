@@ -186,9 +186,9 @@ export const agentsHandlers: GatewayRequestHandlers = {
     agents.list = list;
     nextConfig.agents = agents;
 
-    await writeConfigFile(nextConfig);
     const workspaceDir = resolveAgentWorkspaceDir(nextConfig, agentId);
     await fs.mkdir(workspaceDir, { recursive: true });
+    await writeConfigFile(nextConfig);
     respond(true, { ok: true, agentId, workspace: workspaceDir }, undefined);
   },
   "agents.files.list": async ({ params, respond }) => {
