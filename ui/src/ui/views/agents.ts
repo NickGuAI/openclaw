@@ -59,7 +59,17 @@ export type AgentsProps = {
   agentSkillsError: string | null;
   agentSkillsAgentId: string | null;
   skillsFilter: string;
+  createDialogOpen: boolean;
+  createId: string;
+  createName: string;
+  createError: string | null;
+  createLoading: boolean;
   onRefresh: () => void;
+  onCreateDialogOpen: () => void;
+  onCreateDialogClose: () => void;
+  onCreateIdChange: (next: string) => void;
+  onCreateNameChange: (next: string) => void;
+  onCreateAgent: () => void;
   onSelectAgent: (agentId: string) => void;
   onSelectPanel: (panel: AgentsPanel) => void;
   onLoadFiles: (agentId: string) => void;
@@ -550,9 +560,18 @@ export function renderAgents(props: AgentsProps) {
             <div class="card-title">Agents</div>
             <div class="card-sub">${agents.length} configured.</div>
           </div>
-          <button class="btn btn--sm" ?disabled=${props.loading} @click=${props.onRefresh}>
-            ${props.loading ? "Loading…" : "Refresh"}
-          </button>
+          <div class="row" style="gap: 8px;">
+            <button
+              class="btn btn--sm"
+              ?disabled=${props.createLoading}
+              @click=${props.onCreateDialogOpen}
+            >
+              + Add
+            </button>
+            <button class="btn btn--sm" ?disabled=${props.loading} @click=${props.onRefresh}>
+              ${props.loading ? "Loading…" : "Refresh"}
+            </button>
+          </div>
         </div>
         ${
           props.error
@@ -587,6 +606,61 @@ export function renderAgents(props: AgentsProps) {
                 })
           }
         </div>
+        ${
+          props.createDialogOpen
+            ? html`
+                <section class="card" style="margin-top: 12px;">
+                  <div class="card-title">Create Agent</div>
+                  <div class="card-sub">Add a new agent id and optional display name.</div>
+                  <label class="field" style="margin-top: 12px;">
+                    <span>Agent ID</span>
+                    <input
+                      .value=${props.createId}
+                      placeholder="agent-id"
+                      ?disabled=${props.createLoading}
+                      @input=${(event: Event) =>
+                        props.onCreateIdChange((event.target as HTMLInputElement).value)}
+                    />
+                  </label>
+                  <label class="field" style="margin-top: 8px;">
+                    <span>Name (optional)</span>
+                    <input
+                      .value=${props.createName}
+                      placeholder="Friendly name"
+                      ?disabled=${props.createLoading}
+                      @input=${(event: Event) =>
+                        props.onCreateNameChange((event.target as HTMLInputElement).value)}
+                    />
+                  </label>
+                  ${
+                    props.createError
+                      ? html`
+                          <div class="callout danger" style="margin-top: 10px;">
+                            ${props.createError}
+                          </div>
+                        `
+                      : nothing
+                  }
+                  <div class="row" style="justify-content: flex-end; gap: 8px; margin-top: 12px;">
+                    <button
+                      class="btn btn--sm"
+                      ?disabled=${props.createLoading}
+                      @click=${props.onCreateDialogClose}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      class="btn btn--sm primary"
+                      ?disabled=${props.createLoading || !props.createId.trim()}
+                      @click=${props.onCreateAgent}
+                    >
+                      ${props.createLoading ? "Creating…" : "Create"}
+                    </button>
+                  </div>
+                </section>
+              `
+            : nothing
+        }
       </section>
       <section class="agents-main">
         ${

@@ -13,12 +13,13 @@ import {
   DEFAULT_TOOLS_FILENAME,
   DEFAULT_USER_FILENAME,
 } from "../../agents/workspace.js";
-import { loadConfig } from "../../config/config.js";
+import { loadConfig, readConfigFileSnapshot, writeConfigFile } from "../../config/config.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import {
   ErrorCodes,
   errorShape,
   formatValidationErrors,
+  validateAgentsCreateParams,
   validateAgentsFilesGetParams,
   validateAgentsFilesListParams,
   validateAgentsFilesSetParams,
@@ -140,6 +141,55 @@ export const agentsHandlers: GatewayRequestHandlers = {
     const cfg = loadConfig();
     const result = listAgentsForGateway(cfg);
     respond(true, result, undefined);
+  },
+  "agents.create": async ({ params, respond }) => {
+    if (!validateAgentsCreateParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid agents.create params: ${formatValidationErrors(validateAgentsCreateParams.errors)}`,
+        ),
+      );
+      return;
+    }
+    const agentId = normalizeAgentId(String(params.id ?? ""));
+    const snapshot = await readConfigFileSnapshot();
+    if (!snapshot.valid) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "config invalid; fix it before creating agents"),
+      );
+      return;
+    }
+
+    const cfg = loadConfig();
+    const knownIds = new Set([...listAgentIds(cfg), ...listAgentIds(snapshot.config)]);
+    if (knownIds.has(agentId)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `agent id already exists: ${agentId}`),
+      );
+      return;
+    }
+
+    const nextConfig = { ...snapshot.config };
+    const agents: NonNullable<typeof nextConfig.agents> = nextConfig.agents
+      ? { ...nextConfig.agents }
+      : {};
+    const list = Array.isArray(agents.list) ? [...agents.list] : [];
+    const name = typeof params.name === "string" ? params.name.trim() : "";
+    list.push(name ? { id: agentId, name } : { id: agentId });
+    agents.list = list;
+    nextConfig.agents = agents;
+
+    await writeConfigFile(nextConfig);
+    const workspaceDir = resolveAgentWorkspaceDir(nextConfig, agentId);
+    await fs.mkdir(workspaceDir, { recursive: true });
+    respond(true, { ok: true, agentId, workspace: workspaceDir }, undefined);
   },
   "agents.files.list": async ({ params, respond }) => {
     if (!validateAgentsFilesListParams(params)) {

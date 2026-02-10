@@ -7,7 +7,7 @@ import { OpenClawApp } from "./app.ts";
 import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
-import { loadAgents } from "./controllers/agents.ts";
+import { createAgent, loadAgents } from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
 import { ChatState, loadChatHistory } from "./controllers/chat.ts";
 import {
@@ -391,12 +391,52 @@ export function renderApp(state: AppViewState) {
                 agentSkillsError: state.agentSkillsError,
                 agentSkillsAgentId: state.agentSkillsAgentId,
                 skillsFilter: state.skillsFilter,
+                createDialogOpen: state.agentCreateDialogOpen,
+                createId: state.agentCreateId,
+                createName: state.agentCreateName,
+                createError: state.agentCreateError,
+                createLoading: state.agentCreateLoading,
                 onRefresh: async () => {
                   await loadAgents(state);
                   const agentIds = state.agentsList?.agents?.map((entry) => entry.id) ?? [];
                   if (agentIds.length > 0) {
                     void loadAgentIdentities(state, agentIds);
                   }
+                },
+                onCreateDialogOpen: () => {
+                  state.agentCreateDialogOpen = true;
+                  state.agentCreateError = null;
+                },
+                onCreateDialogClose: () => {
+                  state.agentCreateDialogOpen = false;
+                  state.agentCreateId = "";
+                  state.agentCreateName = "";
+                  state.agentCreateError = null;
+                },
+                onCreateIdChange: (next) => {
+                  state.agentCreateId = next;
+                  if (state.agentCreateError) {
+                    state.agentCreateError = null;
+                  }
+                },
+                onCreateNameChange: (next) => {
+                  state.agentCreateName = next;
+                  if (state.agentCreateError) {
+                    state.agentCreateError = null;
+                  }
+                },
+                onCreateAgent: () => {
+                  void (async () => {
+                    const created = await createAgent(state, {
+                      id: state.agentCreateId,
+                      name: state.agentCreateName,
+                    });
+                    if (!created) {
+                      return;
+                    }
+                    await loadConfig(state as unknown as ConfigState);
+                    void loadAgentIdentity(state, created.agentId);
+                  })();
                 },
                 onSelectAgent: (agentId) => {
                   if (state.agentsSelectedId === agentId) {

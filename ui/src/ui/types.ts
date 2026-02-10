@@ -342,6 +342,12 @@ export type AgentsListResult = {
   agents: GatewayAgentRow[];
 };
 
+export type AgentsCreateResult = {
+  ok: true;
+  agentId: string;
+  workspace: string;
+};
+
 export type AgentIdentityResult = {
   agentId: string;
   name: string;
