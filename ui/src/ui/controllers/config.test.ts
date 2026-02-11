@@ -232,6 +232,61 @@ describe("refreshConfigSnapshotHash", () => {
       '{\n  "gateway": {\n    "mode": "remote",\n    "port": 19000\n  },\n  "agents": {\n    "list": [\n      {\n        "id": "alpha"\n      }\n    ]\n  }\n}\n',
     );
   });
+
+  it("preserves remote array additions while rebasing local array edits", async () => {
+    const request = vi.fn().mockResolvedValue({
+      hash: "new-hash",
+      config: {
+        agents: {
+          list: [
+            { id: "alpha", name: "Alpha" },
+            { id: "beta", name: "Beta" },
+          ],
+        },
+      },
+      valid: true,
+      issues: [],
+      raw: '{ "agents": { "list": [{ "id": "alpha", "name": "Alpha" }, { "id": "beta", "name": "Beta" }] } }',
+    });
+    const state = createState();
+    state.connected = true;
+    state.client = { request } as unknown as ConfigState["client"];
+    state.configFormDirty = true;
+    state.configFormMode = "form";
+    state.configFormOriginal = {
+      agents: {
+        list: [{ id: "alpha", name: "Alpha" }],
+      },
+    };
+    state.configForm = {
+      agents: {
+        list: [{ id: "alpha", name: "ALPHA OVERRIDE" }],
+      },
+    };
+    state.configSnapshot = {
+      hash: "old-hash",
+      config: {
+        agents: {
+          list: [{ id: "alpha", name: "Alpha" }],
+        },
+      },
+      valid: true,
+      issues: [],
+      raw: "{}",
+    };
+
+    await refreshConfigSnapshotHash(state, { rebaseDirtyForm: true });
+
+    expect(state.configSnapshot?.hash).toBe("new-hash");
+    expect(state.configForm).toEqual({
+      agents: {
+        list: [
+          { id: "alpha", name: "ALPHA OVERRIDE" },
+          { id: "beta", name: "Beta" },
+        ],
+      },
+    });
+  });
 });
 
 describe("applyConfig", () => {

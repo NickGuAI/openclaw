@@ -95,6 +95,26 @@ function collectRebaseOps(base: unknown, next: unknown, path: ConfigPath, ops: C
   if (valuesEqual(base, next)) {
     return;
   }
+  if (Array.isArray(base) && Array.isArray(next)) {
+    const sharedLength = Math.min(base.length, next.length);
+    for (let index = 0; index < sharedLength; index += 1) {
+      collectRebaseOps(base[index], next[index], [...path, index], ops);
+    }
+    if (next.length > base.length) {
+      for (let index = sharedLength; index < next.length; index += 1) {
+        ops.push({
+          kind: "set",
+          path: [...path, index],
+          value: cloneConfigObject(next[index]),
+        });
+      }
+      return;
+    }
+    for (let index = base.length - 1; index >= next.length; index -= 1) {
+      ops.push({ kind: "remove", path: [...path, index] });
+    }
+    return;
+  }
   if (Array.isArray(base) || Array.isArray(next)) {
     ops.push({ kind: "set", path, value: cloneConfigObject(next) });
     return;
