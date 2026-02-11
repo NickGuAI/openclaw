@@ -20,6 +20,7 @@ import {
   resolveConfigSnapshotHash,
   writeConfigFile,
 } from "../../config/config.js";
+import { ConfigIncludeError, resolveConfigIncludes } from "../../config/includes.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import {
   ErrorCodes,
@@ -73,6 +74,19 @@ function addAgentListEntry(
   agents.list = list;
   next.agents = agents;
   return next;
+}
+
+function resolveParsedConfigBase(
+  snapshot: Awaited<ReturnType<typeof readConfigFileSnapshot>>,
+): OpenClawConfig | null {
+  if (!snapshot.parsed || typeof snapshot.parsed !== "object" || Array.isArray(snapshot.parsed)) {
+    return null;
+  }
+  const includeResolved = resolveConfigIncludes(snapshot.parsed, snapshot.path);
+  if (!includeResolved || typeof includeResolved !== "object" || Array.isArray(includeResolved)) {
+    return null;
+  }
+  return structuredClone(includeResolved as Record<string, unknown>) as OpenClawConfig;
 }
 
 type FileMeta = {
@@ -225,26 +239,35 @@ export const agentsHandlers: GatewayRequestHandlers = {
         return;
       }
 
-      if (
-        !snapshot.parsed ||
-        typeof snapshot.parsed !== "object" ||
-        Array.isArray(snapshot.parsed)
-      ) {
+      let parsedBase: OpenClawConfig;
+      try {
+        const resolvedParsed = resolveParsedConfigBase(snapshot);
+        if (!resolvedParsed) {
+          respond(
+            false,
+            undefined,
+            errorShape(ErrorCodes.INVALID_REQUEST, "config invalid; fix it before creating agents"),
+          );
+          return;
+        }
+        parsedBase = resolvedParsed;
+      } catch (err) {
+        const message =
+          err instanceof ConfigIncludeError
+            ? err.message
+            : `Include resolution failed: ${String(err)}`;
         respond(
           false,
           undefined,
-          errorShape(ErrorCodes.INVALID_REQUEST, "config invalid; fix it before creating agents"),
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            `config invalid; fix it before creating agents (${message})`,
+          ),
         );
         return;
       }
 
-      const nextConfig = addAgentListEntry(
-        structuredClone(snapshot.parsed as Record<string, unknown>) as OpenClawConfig,
-        {
-          agentId,
-          name,
-        },
-      );
+      const nextConfig = addAgentListEntry(parsedBase, { agentId, name });
       const workspaceConfig = addAgentListEntry(snapshot.config, { agentId, name });
       const workspaceDir = resolveAgentWorkspaceDir(workspaceConfig, agentId);
       await fs.mkdir(workspaceDir, { recursive: true });
@@ -303,7 +326,23 @@ export const agentsHandlers: GatewayRequestHandlers = {
         return;
       }
 
-      await writeConfigFile(nextConfig);
+      try {
+        await writeConfigFile(nextConfig, { expectedBaseHash: snapshotHash ?? undefined });
+      } catch (err) {
+        const error = err as { code?: string };
+        if (error?.code === "CONFIG_BASE_HASH_MISMATCH") {
+          respond(
+            false,
+            undefined,
+            errorShape(
+              ErrorCodes.INVALID_REQUEST,
+              "config changed since request start; re-run agents.create and retry",
+            ),
+          );
+          return;
+        }
+        throw err;
+      }
       respond(true, { ok: true, agentId, workspace: workspaceDir }, undefined);
     });
   },

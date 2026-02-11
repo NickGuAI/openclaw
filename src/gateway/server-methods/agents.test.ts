@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   mkdir: vi.fn(),
   loadConfig: vi.fn(),
   readConfigFileSnapshot: vi.fn(),
+  resolveConfigIncludes: vi.fn((value: unknown) => value),
   resolveConfigSnapshotHash: vi.fn(),
   writeConfigFile: vi.fn(),
 }));
@@ -24,6 +25,18 @@ vi.mock("../../config/config.js", () => ({
   readConfigFileSnapshot: (...args: unknown[]) => mocks.readConfigFileSnapshot(...args),
   resolveConfigSnapshotHash: (...args: unknown[]) => mocks.resolveConfigSnapshotHash(...args),
   writeConfigFile: (...args: unknown[]) => mocks.writeConfigFile(...args),
+}));
+
+vi.mock("../../config/includes.js", () => ({
+  ConfigIncludeError: class ConfigIncludeError extends Error {
+    constructor(message: string, includePath = "$include", cause?: Error) {
+      super(message);
+      this.name = "ConfigIncludeError";
+      (this as { includePath?: string; cause?: Error }).includePath = includePath;
+      (this as { includePath?: string; cause?: Error }).cause = cause;
+    }
+  },
+  resolveConfigIncludes: (...args: unknown[]) => mocks.resolveConfigIncludes(...args),
 }));
 
 vi.mock("../../agents/agent-scope.js", () => ({
@@ -251,6 +264,82 @@ describe("agents.create", () => {
       true,
       expect.objectContaining({ workspace: "/home/test/workspace-default" }),
       undefined,
+    );
+  });
+
+  it("resolves include directives before persisting created agents", async () => {
+    const parsedConfig = {
+      $include: "./base.json5",
+    };
+    const includeResolved = {
+      channels: { telegram: { botToken: "${TELEGRAM_BOT_TOKEN}" } },
+      agents: { list: [] },
+    };
+    const resolvedConfig = {
+      channels: { telegram: { botToken: "123456:resolved-token" } },
+      agents: { list: [] },
+    };
+    const snapshot = makeSnapshot(resolvedConfig, {
+      parsed: parsedConfig,
+      hash: "hash-1",
+      raw: JSON.stringify(parsedConfig),
+    });
+
+    mocks.mkdir.mockResolvedValue(undefined);
+    mocks.loadConfig.mockImplementation(() => cloneJson(resolvedConfig));
+    mocks.readConfigFileSnapshot.mockImplementation(async () => cloneJson(snapshot));
+    mocks.resolveConfigIncludes.mockReturnValueOnce(cloneJson(includeResolved));
+    mocks.resolveConfigSnapshotHash.mockImplementation((snap: { hash?: unknown }) =>
+      typeof snap.hash === "string" ? snap.hash : null,
+    );
+    mocks.writeConfigFile.mockResolvedValue(undefined);
+
+    const respond = vi.fn();
+    await callAgentsCreate("alpha", respond);
+
+    expect(mocks.resolveConfigIncludes).toHaveBeenCalledWith(parsedConfig, "/tmp/config.json");
+    const written = mocks.writeConfigFile.mock.calls[0]?.[0] as {
+      channels?: { telegram?: { botToken?: string } };
+      agents?: { list?: Array<{ id?: string }> };
+    };
+    expect(written.channels?.telegram?.botToken).toBe("${TELEGRAM_BOT_TOKEN}");
+    expect(written.agents?.list).toEqual([{ id: "alpha" }]);
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ ok: true, agentId: "alpha" }),
+      undefined,
+    );
+  });
+
+  it("fails create when config changes between hash check and atomic write", async () => {
+    const snapshot = makeSnapshot({
+      agents: { list: [] },
+    });
+
+    mocks.mkdir.mockResolvedValue(undefined);
+    mocks.loadConfig.mockImplementation(() => ({ agents: { list: [] } }));
+    mocks.readConfigFileSnapshot.mockImplementation(async () => cloneJson(snapshot));
+    mocks.resolveConfigSnapshotHash.mockImplementation((snap: { hash?: unknown }) =>
+      typeof snap.hash === "string" ? snap.hash : null,
+    );
+    mocks.writeConfigFile.mockImplementation(async () => {
+      const error = new Error("hash mismatch") as Error & { code?: string };
+      error.code = "CONFIG_BASE_HASH_MISMATCH";
+      throw error;
+    });
+
+    const respond = vi.fn();
+    await callAgentsCreate("alpha", respond);
+
+    expect(mocks.writeConfigFile).toHaveBeenCalledWith(expect.any(Object), {
+      expectedBaseHash: snapshot.hash,
+    });
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        message: "config changed since request start; re-run agents.create and retry",
+      }),
     );
   });
 });
