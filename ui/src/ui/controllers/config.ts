@@ -34,6 +34,113 @@ export type ConfigState = {
   lastError: string | null;
 };
 
+type RefreshConfigSnapshotHashOptions = {
+  rebaseDirtyForm?: boolean;
+};
+
+type ConfigPath = Array<string | number>;
+type ConfigRebaseOp =
+  | {
+      kind: "set";
+      path: ConfigPath;
+      value: unknown;
+    }
+  | {
+      kind: "remove";
+      path: ConfigPath;
+    };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) {
+    return true;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      return false;
+    }
+    for (let index = 0; index < left.length; index += 1) {
+      if (!valuesEqual(left[index], right[index])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (isRecord(left) || isRecord(right)) {
+    if (!isRecord(left) || !isRecord(right)) {
+      return false;
+    }
+    const leftKeys = Object.keys(left);
+    const rightKeys = Object.keys(right);
+    if (leftKeys.length !== rightKeys.length) {
+      return false;
+    }
+    for (const key of leftKeys) {
+      if (!Object.hasOwn(right, key)) {
+        return false;
+      }
+      if (!valuesEqual(left[key], right[key])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+function collectRebaseOps(base: unknown, next: unknown, path: ConfigPath, ops: ConfigRebaseOp[]) {
+  if (valuesEqual(base, next)) {
+    return;
+  }
+  if (Array.isArray(base) || Array.isArray(next)) {
+    ops.push({ kind: "set", path, value: cloneConfigObject(next) });
+    return;
+  }
+  if (isRecord(base) && isRecord(next)) {
+    for (const key of Object.keys(base)) {
+      if (!Object.hasOwn(next, key)) {
+        ops.push({ kind: "remove", path: [...path, key] });
+      }
+    }
+    for (const key of Object.keys(next)) {
+      if (!Object.hasOwn(base, key)) {
+        ops.push({ kind: "set", path: [...path, key], value: cloneConfigObject(next[key]) });
+        continue;
+      }
+      collectRebaseOps(base[key], next[key], [...path, key], ops);
+    }
+    return;
+  }
+  ops.push({ kind: "set", path, value: cloneConfigObject(next) });
+}
+
+function rebaseFormEdits(params: {
+  original: Record<string, unknown>;
+  current: Record<string, unknown>;
+  latest: Record<string, unknown>;
+}): Record<string, unknown> {
+  const ops: ConfigRebaseOp[] = [];
+  collectRebaseOps(params.original, params.current, [], ops);
+  let rebased = cloneConfigObject(params.latest);
+  for (const op of ops) {
+    if (op.path.length === 0) {
+      if (op.kind === "set" && isRecord(op.value)) {
+        rebased = cloneConfigObject(op.value);
+      }
+      continue;
+    }
+    if (op.kind === "set") {
+      setPathValue(rebased, op.path, cloneConfigObject(op.value));
+      continue;
+    }
+    removePathValue(rebased, op.path);
+  }
+  return rebased;
+}
+
 export async function loadConfig(state: ConfigState) {
   if (!state.client || !state.connected) {
     return;
@@ -50,15 +157,47 @@ export async function loadConfig(state: ConfigState) {
   }
 }
 
-export async function refreshConfigSnapshotHash(state: ConfigState) {
+export async function refreshConfigSnapshotHash(
+  state: ConfigState,
+  options: RefreshConfigSnapshotHashOptions = {},
+) {
   if (!state.client || !state.connected) {
     return;
   }
   try {
     const res = await state.client.request<ConfigSnapshot>("config.get", {});
-    if (state.configFormDirty) {
+    const shouldRebaseDirtyForm =
+      state.configFormDirty && state.configFormMode === "form" && options.rebaseDirtyForm === true;
+    if (state.configFormDirty && !shouldRebaseDirtyForm) {
       // Keep the original base hash while edits are dirty so optimistic-lock checks still detect
       // out-of-date saves instead of silently accepting stale local content.
+      state.configValid = typeof res.valid === "boolean" ? res.valid : state.configValid;
+      state.configIssues = Array.isArray(res.issues) ? res.issues : state.configIssues;
+      return;
+    }
+    if (shouldRebaseDirtyForm) {
+      const latestConfig = cloneConfigObject(
+        res.config && typeof res.config === "object" ? res.config : {},
+      ) as Record<string, unknown>;
+      const originalConfig = cloneConfigObject(
+        state.configFormOriginal ??
+          (state.configSnapshot?.config && typeof state.configSnapshot.config === "object"
+            ? state.configSnapshot.config
+            : {}),
+      ) as Record<string, unknown>;
+      const currentForm = cloneConfigObject(state.configForm ?? {}) as Record<string, unknown>;
+      const rebasedForm = rebaseFormEdits({
+        original: originalConfig,
+        current: currentForm,
+        latest: latestConfig,
+      });
+
+      state.configSnapshot = res;
+      state.configForm = rebasedForm;
+      state.configRaw = serializeConfigForm(rebasedForm);
+      state.configFormOriginal = latestConfig;
+      state.configRawOriginal =
+        typeof res.raw === "string" ? res.raw : serializeConfigForm(latestConfig);
       state.configValid = typeof res.valid === "boolean" ? res.valid : state.configValid;
       state.configIssues = Array.isArray(res.issues) ? res.issues : state.configIssues;
       return;

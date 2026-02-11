@@ -447,7 +447,9 @@ export function renderApp(state: AppViewState) {
                           );
                         }
                       }
-                      await refreshConfigSnapshotHash(state as unknown as ConfigState);
+                      await refreshConfigSnapshotHash(state as unknown as ConfigState, {
+                        rebaseDirtyForm: state.configFormMode === "form",
+                      });
                     } else {
                       await loadConfig(state as unknown as ConfigState);
                     }
