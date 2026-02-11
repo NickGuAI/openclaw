@@ -391,6 +391,45 @@ describe("refreshConfigSnapshotHash", () => {
       },
     });
   });
+
+  it("preserves implicit default + created agent when rebasing unrelated dirty edits", async () => {
+    const request = vi.fn().mockResolvedValue({
+      hash: "new-hash",
+      config: {
+        gateway: { mode: "local", port: 19000 },
+        agents: {
+          list: [{ id: "main" }, { id: "alpha" }],
+        },
+      },
+      valid: true,
+      issues: [],
+      raw: '{ "gateway": { "mode": "local", "port": 19000 }, "agents": { "list": [{ "id": "main" }, { "id": "alpha" }] } }',
+    });
+    const state = createState();
+    state.connected = true;
+    state.client = { request } as unknown as ConfigState["client"];
+    state.configFormDirty = true;
+    state.configFormMode = "form";
+    state.configFormOriginal = { gateway: { mode: "local", port: 18789 } };
+    state.configForm = { gateway: { mode: "remote", port: 18789 } };
+    state.configSnapshot = {
+      hash: "old-hash",
+      config: { gateway: { mode: "local", port: 18789 } },
+      valid: true,
+      issues: [],
+      raw: "{}",
+    };
+
+    await refreshConfigSnapshotHash(state, { rebaseDirtyForm: true });
+
+    expect(state.configSnapshot?.hash).toBe("new-hash");
+    expect(state.configForm).toEqual({
+      gateway: { mode: "remote", port: 19000 },
+      agents: {
+        list: [{ id: "main" }, { id: "alpha" }],
+      },
+    });
+  });
 });
 
 describe("applyConfig", () => {

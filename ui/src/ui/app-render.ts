@@ -429,7 +429,6 @@ export function renderApp(state: AppViewState) {
                 },
                 onCreateAgent: () => {
                   void (async () => {
-                    const requestedName = state.agentCreateName.trim();
                     const created = await createAgent(state, {
                       id: state.agentCreateId,
                       name: state.agentCreateName,
@@ -439,16 +438,6 @@ export function renderApp(state: AppViewState) {
                     }
                     const hasUnsavedConfig = hasUnsavedConfigEdits(state as unknown as ConfigState);
                     if (hasUnsavedConfig) {
-                      if (state.configFormMode === "form") {
-                        const index = ensureAgentListEntry(created.agentId);
-                        if (requestedName) {
-                          updateConfigFormValue(
-                            state as unknown as ConfigState,
-                            ["agents", "list", index, "name"],
-                            requestedName,
-                          );
-                        }
-                      }
                       await refreshConfigSnapshotHash(state as unknown as ConfigState, {
                         rebaseDirtyForm: state.configFormMode === "form",
                       });
