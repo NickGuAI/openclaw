@@ -109,6 +109,11 @@ export type AppViewState = {
   agentsList: AgentsListResult | null;
   agentsError: string | null;
   agentsSelectedId: string | null;
+  agentCreateDialogOpen: boolean;
+  agentCreateId: string;
+  agentCreateName: string;
+  agentCreateError: string | null;
+  agentCreateLoading: boolean;
   agentsPanel: "overview" | "files" | "tools" | "skills" | "channels" | "cron";
   agentFilesLoading: boolean;
   agentFilesError: string | null;

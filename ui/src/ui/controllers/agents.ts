@@ -1,5 +1,5 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
-import type { AgentsListResult } from "../types.ts";
+import type { AgentsCreateResult, AgentsListResult } from "../types.ts";
 
 export type AgentsState = {
   client: GatewayBrowserClient | null;
@@ -8,6 +8,11 @@ export type AgentsState = {
   agentsError: string | null;
   agentsList: AgentsListResult | null;
   agentsSelectedId: string | null;
+  agentCreateDialogOpen: boolean;
+  agentCreateId: string;
+  agentCreateName: string;
+  agentCreateError: string | null;
+  agentCreateLoading: boolean;
 };
 
 export async function loadAgents(state: AgentsState) {
@@ -33,5 +38,44 @@ export async function loadAgents(state: AgentsState) {
     state.agentsError = String(err);
   } finally {
     state.agentsLoading = false;
+  }
+}
+
+export async function createAgent(
+  state: AgentsState,
+  params: { id: string; name?: string },
+): Promise<AgentsCreateResult | null> {
+  if (!state.client || !state.connected || state.agentCreateLoading) {
+    return null;
+  }
+
+  const id = params.id.trim();
+  const name = params.name?.trim();
+  if (!id) {
+    state.agentCreateError = "Agent ID is required.";
+    return null;
+  }
+
+  state.agentCreateLoading = true;
+  state.agentCreateError = null;
+  try {
+    const res = await state.client.request<AgentsCreateResult>("agents.create", {
+      id,
+      ...(name ? { name } : {}),
+    });
+    if (!res) {
+      return null;
+    }
+    await loadAgents(state);
+    state.agentsSelectedId = res.agentId;
+    state.agentCreateDialogOpen = false;
+    state.agentCreateId = "";
+    state.agentCreateName = "";
+    return res;
+  } catch (err) {
+    state.agentCreateError = String(err);
+    return null;
+  } finally {
+    state.agentCreateLoading = false;
   }
 }

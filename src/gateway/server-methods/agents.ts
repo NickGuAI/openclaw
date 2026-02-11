@@ -1,7 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { GatewayRequestHandlers } from "./types.js";
-import { listAgentIds, resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
+import {
+  listAgentIds,
+  resolveAgentWorkspaceDir,
+  resolveDefaultAgentId,
+} from "../../agents/agent-scope.js";
 import {
   DEFAULT_AGENTS_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
@@ -13,12 +17,20 @@ import {
   DEFAULT_TOOLS_FILENAME,
   DEFAULT_USER_FILENAME,
 } from "../../agents/workspace.js";
-import { loadConfig } from "../../config/config.js";
+import {
+  loadConfig,
+  type OpenClawConfig,
+  readConfigFileSnapshot,
+  resolveConfigSnapshotHash,
+  writeConfigFile,
+} from "../../config/config.js";
+import { ConfigIncludeError, resolveConfigIncludes } from "../../config/includes.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import {
   ErrorCodes,
   errorShape,
   formatValidationErrors,
+  validateAgentsCreateParams,
   validateAgentsFilesGetParams,
   validateAgentsFilesListParams,
   validateAgentsFilesSetParams,
@@ -39,6 +51,52 @@ const BOOTSTRAP_FILE_NAMES = [
 const MEMORY_FILE_NAMES = [DEFAULT_MEMORY_FILENAME, DEFAULT_MEMORY_ALT_FILENAME] as const;
 
 const ALLOWED_FILE_NAMES = new Set<string>([...BOOTSTRAP_FILE_NAMES, ...MEMORY_FILE_NAMES]);
+
+// Serialize agents.create mutations so concurrent creates cannot overwrite each other.
+let agentsCreateQueue: Promise<void> = Promise.resolve();
+
+function runAgentsCreateSerialized<T>(task: () => Promise<T>): Promise<T> {
+  const run = agentsCreateQueue.then(task);
+  agentsCreateQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+function addAgentListEntry(
+  cfg: OpenClawConfig,
+  params: {
+    agentId: string;
+    name: string;
+  },
+): OpenClawConfig {
+  const next = structuredClone(cfg);
+  const agents: NonNullable<OpenClawConfig["agents"]> = next.agents ? { ...next.agents } : {};
+  const list = Array.isArray(agents.list) ? [...agents.list] : [];
+  const normalizedAgentId = normalizeAgentId(params.agentId);
+  const defaultAgentId = normalizeAgentId(resolveDefaultAgentId(next));
+  if (list.length === 0 && normalizedAgentId !== defaultAgentId) {
+    list.push({ id: defaultAgentId });
+  }
+  list.push(params.name ? { id: normalizedAgentId, name: params.name } : { id: normalizedAgentId });
+  agents.list = list;
+  next.agents = agents;
+  return next;
+}
+
+function resolveParsedConfigBase(
+  snapshot: Awaited<ReturnType<typeof readConfigFileSnapshot>>,
+): OpenClawConfig | null {
+  if (!snapshot.parsed || typeof snapshot.parsed !== "object" || Array.isArray(snapshot.parsed)) {
+    return null;
+  }
+  const includeResolved = resolveConfigIncludes(snapshot.parsed, snapshot.path);
+  if (!includeResolved || typeof includeResolved !== "object" || Array.isArray(includeResolved)) {
+    return null;
+  }
+  return structuredClone(includeResolved as Record<string, unknown>) as OpenClawConfig;
+}
 
 type FileMeta = {
   size: number;
@@ -140,6 +198,162 @@ export const agentsHandlers: GatewayRequestHandlers = {
     const cfg = loadConfig();
     const result = listAgentsForGateway(cfg);
     respond(true, result, undefined);
+  },
+  "agents.create": async ({ params, respond }) => {
+    if (!validateAgentsCreateParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid agents.create params: ${formatValidationErrors(validateAgentsCreateParams.errors)}`,
+        ),
+      );
+      return;
+    }
+    const agentId = normalizeAgentId(String(params.id ?? ""));
+    const name = typeof params.name === "string" ? params.name.trim() : "";
+
+    await runAgentsCreateSerialized(async () => {
+      const snapshot = await readConfigFileSnapshot();
+      if (!snapshot.valid) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, "config invalid; fix it before creating agents"),
+        );
+        return;
+      }
+      const snapshotHash = resolveConfigSnapshotHash(snapshot);
+      if (snapshot.exists && !snapshotHash) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            "config base hash unavailable; re-run agents.create and retry",
+          ),
+        );
+        return;
+      }
+
+      const cfg = loadConfig();
+      const knownIds = new Set([...listAgentIds(cfg), ...listAgentIds(snapshot.config)]);
+      if (knownIds.has(agentId)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, `agent id already exists: ${agentId}`),
+        );
+        return;
+      }
+
+      let parsedBase: OpenClawConfig;
+      try {
+        const resolvedParsed = resolveParsedConfigBase(snapshot);
+        if (!resolvedParsed) {
+          respond(
+            false,
+            undefined,
+            errorShape(ErrorCodes.INVALID_REQUEST, "config invalid; fix it before creating agents"),
+          );
+          return;
+        }
+        parsedBase = resolvedParsed;
+      } catch (err) {
+        const message =
+          err instanceof ConfigIncludeError
+            ? err.message
+            : `Include resolution failed: ${String(err)}`;
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            `config invalid; fix it before creating agents (${message})`,
+          ),
+        );
+        return;
+      }
+
+      const nextConfig = addAgentListEntry(parsedBase, { agentId, name });
+      const workspaceConfig = addAgentListEntry(snapshot.config, { agentId, name });
+      const workspaceDir = resolveAgentWorkspaceDir(workspaceConfig, agentId);
+      await fs.mkdir(workspaceDir, { recursive: true });
+
+      // Avoid overwriting unrelated config edits made while this request was in-flight.
+      const latestSnapshot = await readConfigFileSnapshot();
+      if (!latestSnapshot.valid) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, "config invalid; fix it before creating agents"),
+        );
+        return;
+      }
+      const latestHash = resolveConfigSnapshotHash(latestSnapshot);
+      if (snapshot.exists && !latestHash) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            "config base hash unavailable; re-run agents.create and retry",
+          ),
+        );
+        return;
+      }
+      if (!snapshot.exists && latestSnapshot.exists) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            "config changed since request start; re-run agents.create and retry",
+          ),
+        );
+        return;
+      }
+      if (snapshot.exists && snapshotHash && latestHash && snapshotHash !== latestHash) {
+        const latestKnownIds = new Set(listAgentIds(latestSnapshot.config));
+        if (latestKnownIds.has(agentId)) {
+          respond(
+            false,
+            undefined,
+            errorShape(ErrorCodes.INVALID_REQUEST, `agent id already exists: ${agentId}`),
+          );
+          return;
+        }
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            "config changed since request start; re-run agents.create and retry",
+          ),
+        );
+        return;
+      }
+
+      try {
+        await writeConfigFile(nextConfig, { expectedBaseHash: snapshotHash ?? undefined });
+      } catch (err) {
+        const error = err as { code?: string };
+        if (error?.code === "CONFIG_BASE_HASH_MISMATCH") {
+          respond(
+            false,
+            undefined,
+            errorShape(
+              ErrorCodes.INVALID_REQUEST,
+              "config changed since request start; re-run agents.create and retry",
+            ),
+          );
+          return;
+        }
+        throw err;
+      }
+      respond(true, { ok: true, agentId, workspace: workspaceDir }, undefined);
+    });
   },
   "agents.files.list": async ({ params, respond }) => {
     if (!validateAgentsFilesListParams(params)) {

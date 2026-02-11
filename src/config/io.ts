@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import lockfile from "proper-lockfile";
 import type { OpenClawConfig, ConfigFileSnapshot, LegacyConfigIssue } from "./types.js";
 import {
   loadShellEnvFallback,
@@ -59,6 +60,9 @@ const CONFIG_BACKUP_COUNT = 5;
 const loggedInvalidConfigs = new Set<string>();
 
 export type ParseConfigJson5Result = { ok: true; parsed: unknown } | { ok: false; error: string };
+export type WriteConfigFileOptions = {
+  expectedBaseHash?: string;
+};
 
 function hashConfigRaw(raw: string | null): string {
   return crypto
@@ -208,6 +212,29 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
     : resolveDefaultConfigCandidates(deps.env, deps.homedir);
   const configPath =
     candidatePaths.find((candidate) => deps.fs.existsSync(candidate)) ?? requestedConfigPath;
+
+  async function withConfigWriteLock<T>(task: () => Promise<T>): Promise<T> {
+    const dir = path.dirname(configPath);
+    await deps.fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
+    let release: (() => Promise<void>) | null = null;
+    try {
+      release = await lockfile.lock(dir, {
+        retries: {
+          retries: 50,
+          minTimeout: 20,
+          maxTimeout: 200,
+          factor: 1.2,
+        },
+      });
+      return await task();
+    } finally {
+      if (release) {
+        await release().catch(() => {
+          // best-effort
+        });
+      }
+    }
+  }
 
   function loadConfig(): OpenClawConfig {
     try {
@@ -477,7 +504,7 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
     }
   }
 
-  async function writeConfigFile(cfg: OpenClawConfig) {
+  async function writeConfigFile(cfg: OpenClawConfig, options?: WriteConfigFileOptions) {
     clearConfigCache();
     const validated = validateConfigObjectWithPlugins(cfg);
     if (!validated.ok) {
@@ -491,49 +518,70 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
         .join("\n");
       deps.logger.warn(`Config warnings:\n${details}`);
     }
-    const dir = path.dirname(configPath);
-    await deps.fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
-    const json = JSON.stringify(applyModelDefaults(stampConfigVersion(cfg)), null, 2)
-      .trimEnd()
-      .concat("\n");
+    const expectedBaseHashRaw = options?.expectedBaseHash;
+    const expectedBaseHash =
+      typeof expectedBaseHashRaw === "string" && expectedBaseHashRaw.trim().length > 0
+        ? expectedBaseHashRaw.trim()
+        : null;
 
-    const tmp = path.join(
-      dir,
-      `${path.basename(configPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
-    );
+    await withConfigWriteLock(async () => {
+      if (expectedBaseHash) {
+        const currentRaw = deps.fs.existsSync(configPath)
+          ? await deps.fs.promises.readFile(configPath, "utf-8")
+          : null;
+        const currentHash = hashConfigRaw(currentRaw);
+        if (currentHash !== expectedBaseHash) {
+          const error = new Error(
+            "config changed since last load; re-run config.get and retry",
+          ) as Error & { code?: string };
+          error.code = "CONFIG_BASE_HASH_MISMATCH";
+          throw error;
+        }
+      }
 
-    await deps.fs.promises.writeFile(tmp, json, {
-      encoding: "utf-8",
-      mode: 0o600,
-    });
+      const dir = path.dirname(configPath);
+      const json = JSON.stringify(applyModelDefaults(stampConfigVersion(cfg)), null, 2)
+        .trimEnd()
+        .concat("\n");
 
-    if (deps.fs.existsSync(configPath)) {
-      await rotateConfigBackups(configPath, deps.fs.promises);
-      await deps.fs.promises.copyFile(configPath, `${configPath}.bak`).catch(() => {
-        // best-effort
+      const tmp = path.join(
+        dir,
+        `${path.basename(configPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
+      );
+
+      await deps.fs.promises.writeFile(tmp, json, {
+        encoding: "utf-8",
+        mode: 0o600,
       });
-    }
 
-    try {
-      await deps.fs.promises.rename(tmp, configPath);
-    } catch (err) {
-      const code = (err as { code?: string }).code;
-      // Windows doesn't reliably support atomic replace via rename when dest exists.
-      if (code === "EPERM" || code === "EEXIST") {
-        await deps.fs.promises.copyFile(tmp, configPath);
-        await deps.fs.promises.chmod(configPath, 0o600).catch(() => {
+      if (deps.fs.existsSync(configPath)) {
+        await rotateConfigBackups(configPath, deps.fs.promises);
+        await deps.fs.promises.copyFile(configPath, `${configPath}.bak`).catch(() => {
           // best-effort
         });
+      }
+
+      try {
+        await deps.fs.promises.rename(tmp, configPath);
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        // Windows doesn't reliably support atomic replace via rename when dest exists.
+        if (code === "EPERM" || code === "EEXIST") {
+          await deps.fs.promises.copyFile(tmp, configPath);
+          await deps.fs.promises.chmod(configPath, 0o600).catch(() => {
+            // best-effort
+          });
+          await deps.fs.promises.unlink(tmp).catch(() => {
+            // best-effort
+          });
+          return;
+        }
         await deps.fs.promises.unlink(tmp).catch(() => {
           // best-effort
         });
-        return;
+        throw err;
       }
-      await deps.fs.promises.unlink(tmp).catch(() => {
-        // best-effort
-      });
-      throw err;
-    }
+    });
   }
 
   return {
@@ -608,7 +656,10 @@ export async function readConfigFileSnapshot(): Promise<ConfigFileSnapshot> {
   return await createConfigIO().readConfigFileSnapshot();
 }
 
-export async function writeConfigFile(cfg: OpenClawConfig): Promise<void> {
+export async function writeConfigFile(
+  cfg: OpenClawConfig,
+  options?: WriteConfigFileOptions,
+): Promise<void> {
   clearConfigCache();
-  await createConfigIO().writeConfigFile(cfg);
+  await createConfigIO().writeConfigFile(cfg, options);
 }
