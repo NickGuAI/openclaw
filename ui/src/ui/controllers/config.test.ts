@@ -287,6 +287,55 @@ describe("refreshConfigSnapshotHash", () => {
       },
     });
   });
+
+  it("rebases keyed agent list edits without duplicating ids when order diverges", async () => {
+    const request = vi.fn().mockResolvedValue({
+      hash: "new-hash",
+      config: {
+        agents: {
+          list: [{ id: "alpha" }, { id: "beta" }],
+        },
+      },
+      valid: true,
+      issues: [],
+      raw: '{ "agents": { "list": [{ "id": "alpha" }, { "id": "beta" }] } }',
+    });
+    const state = createState();
+    state.connected = true;
+    state.client = { request } as unknown as ConfigState["client"];
+    state.configFormDirty = true;
+    state.configFormMode = "form";
+    state.configFormOriginal = {
+      agents: {
+        list: [{ id: "alpha" }],
+      },
+    };
+    state.configForm = {
+      agents: {
+        list: [{ id: "beta" }],
+      },
+    };
+    state.configSnapshot = {
+      hash: "old-hash",
+      config: {
+        agents: {
+          list: [{ id: "alpha" }],
+        },
+      },
+      valid: true,
+      issues: [],
+      raw: "{}",
+    };
+
+    await refreshConfigSnapshotHash(state, { rebaseDirtyForm: true });
+
+    expect(state.configSnapshot?.hash).toBe("new-hash");
+    expect(state.configForm).toEqual({
+      agents: {
+        list: [{ id: "beta" }],
+      },
+    });
+  });
 });
 
 describe("applyConfig", () => {

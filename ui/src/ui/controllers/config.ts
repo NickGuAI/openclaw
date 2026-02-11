@@ -48,6 +48,12 @@ type ConfigRebaseOp =
   | {
       kind: "remove";
       path: ConfigPath;
+    }
+  | {
+      kind: "mergeStableArray";
+      path: ConfigPath;
+      base: unknown[];
+      current: unknown[];
     };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,11 +97,56 @@ function valuesEqual(left: unknown, right: unknown): boolean {
   return false;
 }
 
+type StableArrayIndex = {
+  order: string[];
+  keySet: Set<string>;
+  byKey: Map<string, unknown>;
+};
+
+function resolveStableArrayKey(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const idRaw = value.id;
+  if (typeof idRaw !== "string") {
+    return null;
+  }
+  const id = idRaw.trim();
+  return id.length > 0 ? id : null;
+}
+
+function indexStableArray(items: unknown[]): StableArrayIndex | null {
+  const order: string[] = [];
+  const keySet = new Set<string>();
+  const byKey = new Map<string, unknown>();
+  for (const item of items) {
+    const key = resolveStableArrayKey(item);
+    if (!key || keySet.has(key)) {
+      return null;
+    }
+    keySet.add(key);
+    order.push(key);
+    byKey.set(key, cloneConfigObject(item));
+  }
+  return { order, keySet, byKey };
+}
+
 function collectRebaseOps(base: unknown, next: unknown, path: ConfigPath, ops: ConfigRebaseOp[]) {
   if (valuesEqual(base, next)) {
     return;
   }
   if (Array.isArray(base) && Array.isArray(next)) {
+    const stableBase = indexStableArray(base);
+    const stableNext = indexStableArray(next);
+    if (stableBase && stableNext) {
+      ops.push({
+        kind: "mergeStableArray",
+        path,
+        base: cloneConfigObject(base),
+        current: cloneConfigObject(next),
+      });
+      return;
+    }
     const sharedLength = Math.min(base.length, next.length);
     for (let index = 0; index < sharedLength; index += 1) {
       collectRebaseOps(base[index], next[index], [...path, index], ops);
@@ -137,19 +188,139 @@ function collectRebaseOps(base: unknown, next: unknown, path: ConfigPath, ops: C
   ops.push({ kind: "set", path, value: cloneConfigObject(next) });
 }
 
-function rebaseFormEdits(params: {
-  original: Record<string, unknown>;
-  current: Record<string, unknown>;
-  latest: Record<string, unknown>;
-}): Record<string, unknown> {
-  const ops: ConfigRebaseOp[] = [];
-  collectRebaseOps(params.original, params.current, [], ops);
-  let rebased = cloneConfigObject(params.latest);
-  for (const op of ops) {
-    if (op.path.length === 0) {
-      if (op.kind === "set" && isRecord(op.value)) {
-        rebased = cloneConfigObject(op.value);
+function getPathValue(root: unknown, path: ConfigPath): unknown {
+  if (path.length === 0) {
+    return root;
+  }
+  let current: unknown = root;
+  for (const part of path) {
+    if (typeof part === "number") {
+      if (!Array.isArray(current)) {
+        return undefined;
       }
+      current = current[part];
+      continue;
+    }
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[part];
+  }
+  return current;
+}
+
+function rebaseUnknown(base: unknown, current: unknown, latest: unknown): unknown {
+  if (valuesEqual(base, current)) {
+    return cloneConfigObject(latest);
+  }
+  const ops: ConfigRebaseOp[] = [];
+  collectRebaseOps(base, current, [], ops);
+  return applyRebaseOps({ latest, ops });
+}
+
+function mergeStableArray(params: {
+  base: unknown[];
+  current: unknown[];
+  latest: unknown;
+}): unknown[] {
+  const baseIndex = indexStableArray(params.base);
+  const currentIndex = indexStableArray(params.current);
+  if (!baseIndex || !currentIndex) {
+    return cloneConfigObject(params.current);
+  }
+  if (!Array.isArray(params.latest)) {
+    return cloneConfigObject(params.current);
+  }
+  const latestIndex = indexStableArray(params.latest);
+  if (!latestIndex) {
+    return cloneConfigObject(params.current);
+  }
+
+  const resultByKey = new Map<string, unknown>();
+  for (const key of latestIndex.order) {
+    resultByKey.set(key, cloneConfigObject(latestIndex.byKey.get(key)));
+  }
+
+  for (const key of baseIndex.order) {
+    if (!currentIndex.keySet.has(key)) {
+      resultByKey.delete(key);
+    }
+  }
+
+  for (const key of currentIndex.order) {
+    const currentItem = cloneConfigObject(currentIndex.byKey.get(key));
+    if (!baseIndex.keySet.has(key)) {
+      if (resultByKey.has(key)) {
+        const latestItem = resultByKey.get(key);
+        resultByKey.set(key, rebaseUnknown({}, currentItem, latestItem));
+      } else {
+        resultByKey.set(key, currentItem);
+      }
+      continue;
+    }
+    const baseItem = baseIndex.byKey.get(key);
+    if (valuesEqual(baseItem, currentItem)) {
+      continue;
+    }
+    if (resultByKey.has(key)) {
+      const latestItem = resultByKey.get(key);
+      resultByKey.set(key, rebaseUnknown(baseItem, currentItem, latestItem));
+    } else {
+      resultByKey.set(key, currentItem);
+    }
+  }
+
+  const rebased: unknown[] = [];
+  const emitted = new Set<string>();
+  for (const key of currentIndex.order) {
+    if (!resultByKey.has(key) || emitted.has(key)) {
+      continue;
+    }
+    rebased.push(cloneConfigObject(resultByKey.get(key)));
+    emitted.add(key);
+  }
+  for (const key of latestIndex.order) {
+    if (!resultByKey.has(key) || emitted.has(key)) {
+      continue;
+    }
+    rebased.push(cloneConfigObject(resultByKey.get(key)));
+    emitted.add(key);
+  }
+  for (const [key, value] of resultByKey.entries()) {
+    if (emitted.has(key)) {
+      continue;
+    }
+    rebased.push(cloneConfigObject(value));
+  }
+  return rebased;
+}
+
+function applyRebaseOps(params: { latest: unknown; ops: ConfigRebaseOp[] }): unknown {
+  let rebased = cloneConfigObject(params.latest);
+  for (const op of params.ops) {
+    if (op.kind === "mergeStableArray") {
+      const latestAtPath = getPathValue(rebased, op.path);
+      const merged = mergeStableArray({
+        base: op.base,
+        current: op.current,
+        latest: latestAtPath,
+      });
+      if (op.path.length === 0) {
+        rebased = merged;
+      } else if (Array.isArray(rebased) || isRecord(rebased)) {
+        setPathValue(rebased, op.path, merged);
+      }
+      continue;
+    }
+    if (op.path.length === 0) {
+      if (op.kind === "set") {
+        rebased = cloneConfigObject(op.value);
+      } else {
+        rebased = {};
+      }
+      continue;
+    }
+    if (!Array.isArray(rebased) && !isRecord(rebased)) {
       continue;
     }
     if (op.kind === "set") {
@@ -159,6 +330,17 @@ function rebaseFormEdits(params: {
     removePathValue(rebased, op.path);
   }
   return rebased;
+}
+
+function rebaseFormEdits(params: {
+  original: Record<string, unknown>;
+  current: Record<string, unknown>;
+  latest: Record<string, unknown>;
+}): Record<string, unknown> {
+  const ops: ConfigRebaseOp[] = [];
+  collectRebaseOps(params.original, params.current, [], ops);
+  const rebased = applyRebaseOps({ latest: params.latest, ops });
+  return isRecord(rebased) ? rebased : cloneConfigObject(params.latest);
 }
 
 export async function loadConfig(state: ConfigState) {
