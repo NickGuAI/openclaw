@@ -13,6 +13,7 @@ import { ChatState, loadChatHistory } from "./controllers/chat.ts";
 import {
   applyConfig,
   ConfigState,
+  hasUnsavedConfigEdits,
   loadConfig,
   refreshConfigSnapshotHash,
   runUpdate,
@@ -436,7 +437,8 @@ export function renderApp(state: AppViewState) {
                     if (!created) {
                       return;
                     }
-                    if (state.configFormDirty) {
+                    const hasUnsavedConfig = hasUnsavedConfigEdits(state as unknown as ConfigState);
+                    if (hasUnsavedConfig) {
                       if (state.configFormMode === "form") {
                         const index = ensureAgentListEntry(created.agentId);
                         if (requestedName) {

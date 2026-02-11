@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyConfigSnapshot,
   applyConfig,
+  hasUnsavedConfigEdits,
+  hasUnsavedRawConfigEdits,
   refreshConfigSnapshotHash,
   runUpdate,
   updateConfigFormValue,
@@ -137,6 +139,30 @@ describe("updateConfigFormValue", () => {
   });
 });
 
+describe("hasUnsavedConfigEdits", () => {
+  it("detects unsaved raw-mode edits even when form dirty flag is false", () => {
+    const state = createState();
+    state.configFormMode = "raw";
+    state.configRawOriginal = '{ "gateway": { "mode": "local" } }';
+    state.configRaw = '{ "gateway": { "mode": "remote" } }';
+    state.configFormDirty = false;
+
+    expect(hasUnsavedRawConfigEdits(state)).toBe(true);
+    expect(hasUnsavedConfigEdits(state)).toBe(true);
+  });
+
+  it("reports clean when raw matches original and form is not dirty", () => {
+    const state = createState();
+    state.configFormMode = "raw";
+    state.configRawOriginal = '{ "gateway": { "mode": "local" } }';
+    state.configRaw = '{ "gateway": { "mode": "local" } }';
+    state.configFormDirty = false;
+
+    expect(hasUnsavedRawConfigEdits(state)).toBe(false);
+    expect(hasUnsavedConfigEdits(state)).toBe(false);
+  });
+});
+
 describe("refreshConfigSnapshotHash", () => {
   it("does not update snapshot hash while dirty, but keeps validity diagnostics fresh", async () => {
     const request = vi.fn().mockResolvedValue({
@@ -168,6 +194,35 @@ describe("refreshConfigSnapshotHash", () => {
     expect(state.configRaw).toBe(
       '{\n  // unsaved raw edit\n  gateway: { mode: "local", port: 18000 }\n}\n',
     );
+  });
+
+  it("does not update snapshot hash while raw buffer is dirty", async () => {
+    const request = vi.fn().mockResolvedValue({
+      hash: "new-hash",
+      config: { gateway: { mode: "local", port: 18789 } },
+      valid: true,
+      issues: [],
+      raw: '{ "gateway": { "mode": "local", "port": 18789 } }',
+    });
+    const state = createState();
+    state.connected = true;
+    state.client = { request } as unknown as ConfigState["client"];
+    state.configFormDirty = false;
+    state.configFormMode = "raw";
+    state.configRawOriginal = '{\n  gateway: { mode: "local", port: 18789 }\n}\n';
+    state.configRaw = '{\n  gateway: { mode: "local", port: 18000 }\n}\n';
+    state.configSnapshot = {
+      hash: "old-hash",
+      config: { gateway: { mode: "local", port: 18789 } },
+      valid: true,
+      issues: [],
+      raw: "{}",
+    };
+
+    await refreshConfigSnapshotHash(state);
+
+    expect(state.configSnapshot?.hash).toBe("old-hash");
+    expect(state.configRaw).toBe('{\n  gateway: { mode: "local", port: 18000 }\n}\n');
   });
 
   it("updates snapshot hash when config is clean", async () => {

@@ -34,6 +34,23 @@ export type ConfigState = {
   lastError: string | null;
 };
 
+export function hasUnsavedRawConfigEdits(state: {
+  configFormMode: ConfigState["configFormMode"];
+  configRaw: ConfigState["configRaw"];
+  configRawOriginal: ConfigState["configRawOriginal"];
+}): boolean {
+  return state.configFormMode === "raw" && state.configRaw !== state.configRawOriginal;
+}
+
+export function hasUnsavedConfigEdits(state: {
+  configFormDirty: ConfigState["configFormDirty"];
+  configFormMode: ConfigState["configFormMode"];
+  configRaw: ConfigState["configRaw"];
+  configRawOriginal: ConfigState["configRawOriginal"];
+}): boolean {
+  return state.configFormDirty || hasUnsavedRawConfigEdits(state);
+}
+
 type RefreshConfigSnapshotHashOptions = {
   rebaseDirtyForm?: boolean;
 };
@@ -368,9 +385,10 @@ export async function refreshConfigSnapshotHash(
   }
   try {
     const res = await state.client.request<ConfigSnapshot>("config.get", {});
+    const hasUnsavedRawEdits = hasUnsavedRawConfigEdits(state);
     const shouldRebaseDirtyForm =
       state.configFormDirty && state.configFormMode === "form" && options.rebaseDirtyForm === true;
-    if (state.configFormDirty && !shouldRebaseDirtyForm) {
+    if ((state.configFormDirty || hasUnsavedRawEdits) && !shouldRebaseDirtyForm) {
       // Keep the original base hash while edits are dirty so optimistic-lock checks still detect
       // out-of-date saves instead of silently accepting stale local content.
       state.configValid = typeof res.valid === "boolean" ? res.valid : state.configValid;
