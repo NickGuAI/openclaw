@@ -1,7 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { GatewayRequestHandlers } from "./types.js";
-import { listAgentIds, resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
+import {
+  listAgentIds,
+  resolveAgentWorkspaceDir,
+  resolveDefaultAgentId,
+} from "../../agents/agent-scope.js";
 import {
   DEFAULT_AGENTS_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
@@ -70,7 +74,12 @@ function addAgentListEntry(
   const next = structuredClone(cfg);
   const agents: NonNullable<OpenClawConfig["agents"]> = next.agents ? { ...next.agents } : {};
   const list = Array.isArray(agents.list) ? [...agents.list] : [];
-  list.push(params.name ? { id: params.agentId, name: params.name } : { id: params.agentId });
+  const normalizedAgentId = normalizeAgentId(params.agentId);
+  const defaultAgentId = normalizeAgentId(resolveDefaultAgentId(next));
+  if (list.length === 0 && normalizedAgentId !== defaultAgentId) {
+    list.push({ id: defaultAgentId });
+  }
+  list.push(params.name ? { id: normalizedAgentId, name: params.name } : { id: normalizedAgentId });
   agents.list = list;
   next.agents = agents;
   return next;

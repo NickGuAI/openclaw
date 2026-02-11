@@ -49,6 +49,32 @@ vi.mock("../../agents/agent-scope.js", () => ({
       .map((entry) => (entry && typeof entry === "object" ? (entry as { id?: unknown }).id : null))
       .filter((id): id is string => typeof id === "string" && id.trim().length > 0);
   },
+  resolveDefaultAgentId: (cfg: {
+    agents?: { list?: Array<{ id?: unknown; default?: unknown }> };
+  }) => {
+    const list = cfg?.agents?.list;
+    if (!Array.isArray(list) || list.length === 0) {
+      return "main";
+    }
+    const explicitDefault = list.find(
+      (entry) =>
+        entry &&
+        typeof entry === "object" &&
+        entry.default === true &&
+        typeof entry.id === "string" &&
+        entry.id.trim().length > 0,
+    );
+    if (explicitDefault && typeof explicitDefault.id === "string") {
+      return explicitDefault.id.trim();
+    }
+    const first = list.find(
+      (entry) => entry && typeof entry === "object" && typeof entry.id === "string",
+    );
+    if (first && typeof first.id === "string" && first.id.trim().length > 0) {
+      return first.id.trim();
+    }
+    return "main";
+  },
   resolveAgentWorkspaceDir: (
     cfg: { agents?: { list?: unknown[]; defaults?: { workspace?: unknown } } },
     agentId: string,
@@ -172,7 +198,7 @@ describe("agents.create", () => {
       .map((entry) => entry.id)
       .filter((id): id is string => typeof id === "string");
 
-    expect(finalIds).toEqual(["alpha", "beta"]);
+    expect(finalIds).toEqual(["main", "alpha", "beta"]);
     expect(respondAlpha).toHaveBeenCalledWith(
       true,
       expect.objectContaining({ ok: true, agentId: "alpha" }),
@@ -217,7 +243,7 @@ describe("agents.create", () => {
       agents?: { list?: Array<{ id?: string }> };
     };
     expect(written.channels?.telegram?.botToken).toBe("${TELEGRAM_BOT_TOKEN}");
-    expect(written.agents?.list).toEqual([{ id: "alpha" }]);
+    expect(written.agents?.list).toEqual([{ id: "main" }, { id: "alpha" }]);
     expect(respond).toHaveBeenCalledWith(
       true,
       expect.objectContaining({ ok: true, agentId: "alpha" }),
@@ -255,14 +281,49 @@ describe("agents.create", () => {
     const respond = vi.fn();
     await callAgentsCreate("alpha", respond);
 
-    expect(mocks.mkdir).toHaveBeenCalledWith("/home/test/workspace-default", { recursive: true });
+    expect(mocks.mkdir).toHaveBeenCalledWith("/tmp/workspaces/alpha", { recursive: true });
     const written = mocks.writeConfigFile.mock.calls[0]?.[0] as {
       agents?: { defaults?: { workspace?: string } };
     };
     expect(written.agents?.defaults?.workspace).toBe("${HOME}/workspace-default");
     expect(respond).toHaveBeenCalledWith(
       true,
-      expect.objectContaining({ workspace: "/home/test/workspace-default" }),
+      expect.objectContaining({ workspace: "/tmp/workspaces/alpha" }),
+      undefined,
+    );
+  });
+
+  it("preserves implicit default agent when creating first non-default agent", async () => {
+    const config = {
+      agents: {
+        defaults: { workspace: "/tmp/main-default-workspace" },
+      },
+    };
+    const snapshot = makeSnapshot(config, {
+      parsed: config,
+      hash: "hash-1",
+      raw: JSON.stringify(config),
+    });
+
+    mocks.mkdir.mockResolvedValue(undefined);
+    mocks.loadConfig.mockImplementation(() => cloneJson(config));
+    mocks.readConfigFileSnapshot.mockImplementation(async () => cloneJson(snapshot));
+    mocks.resolveConfigSnapshotHash.mockImplementation((snap: { hash?: unknown }) =>
+      typeof snap.hash === "string" ? snap.hash : null,
+    );
+    mocks.writeConfigFile.mockResolvedValue(undefined);
+
+    const respond = vi.fn();
+    await callAgentsCreate("alpha", respond);
+
+    expect(mocks.mkdir).toHaveBeenCalledWith("/tmp/workspaces/alpha", { recursive: true });
+    const written = mocks.writeConfigFile.mock.calls[0]?.[0] as {
+      agents?: { list?: Array<{ id?: string }> };
+    };
+    expect(written.agents?.list).toEqual([{ id: "main" }, { id: "alpha" }]);
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ ok: true, agentId: "alpha", workspace: "/tmp/workspaces/alpha" }),
       undefined,
     );
   });
@@ -303,7 +364,7 @@ describe("agents.create", () => {
       agents?: { list?: Array<{ id?: string }> };
     };
     expect(written.channels?.telegram?.botToken).toBe("${TELEGRAM_BOT_TOKEN}");
-    expect(written.agents?.list).toEqual([{ id: "alpha" }]);
+    expect(written.agents?.list).toEqual([{ id: "main" }, { id: "alpha" }]);
     expect(respond).toHaveBeenCalledWith(
       true,
       expect.objectContaining({ ok: true, agentId: "alpha" }),
