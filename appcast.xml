@@ -62,7 +62,6 @@
             <description><![CDATA[<h2>OpenClaw 2026.2.2</h2>
 <h3>Changes</h3>
 <ul>
-<li>Feishu: add Feishu/Lark plugin support + docs. (#7313) Thanks @jiulingyun (openclaw-cn).</li>
 <li>Web UI: add Agents dashboard for managing agent files, tools, skills, models, channels, and cron jobs.</li>
 <li>Memory: implement the opt-in QMD backend for workspace memory. (#3160) Thanks @vignesh07.</li>
 <li>Security: add healthcheck skill and bootstrap audit guidance. (#7641) Thanks @Takhoffman.</li>

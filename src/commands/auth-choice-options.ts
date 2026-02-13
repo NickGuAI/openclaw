@@ -59,7 +59,7 @@ const AUTH_CHOICE_GROUP_DEFS: {
     value: "moonshot",
     label: "Moonshot AI (Kimi K2.5)",
     hint: "Kimi K2.5 + Kimi Coding",
-    choices: ["moonshot-api-key", "moonshot-api-key-cn", "kimi-code-api-key"],
+    choices: ["moonshot-api-key", "kimi-code-api-key"],
   },
   {
     value: "google",
@@ -160,11 +160,7 @@ export function buildAuthChoiceOptions(params: {
   });
   options.push({
     value: "moonshot-api-key",
-    label: "Kimi API key (.ai)",
-  });
-  options.push({
-    value: "moonshot-api-key-cn",
-    label: "Kimi API key (.cn)",
+    label: "Kimi API key",
   });
   options.push({ value: "kimi-code-api-key", label: "Kimi Code API key (subscription)" });
   options.push({ value: "synthetic-api-key", label: "Synthetic API key" });

@@ -2508,7 +2508,6 @@ Z.AI 模型通过内置的 `zai` 提供商提供。在环境中设置 `ZAI_API_K
 
 - 在环境中设置 `MOONSHOT_API_KEY` 或使用 `openclaw onboard --auth-choice moonshot-api-key`。
 - 模型引用：`moonshot/kimi-k2.5`。
-- 如需中国端点，使用 `https://api.moonshot.cn/v1`。
 
 ### Kimi Coding
 
