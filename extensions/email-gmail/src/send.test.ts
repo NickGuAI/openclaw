@@ -280,6 +280,8 @@ describe("sendEmailGmail", () => {
     const body = JSON.parse(call[1].body as string) as { raw: string };
     const decoded = decodeBase64Url(body.raw);
     expect(decoded).toContain("To: reply-to@example.com");
+    expect(decoded).toContain("Cc: sender@example.com");
+    expect(decoded).not.toContain("Cc: agent@test.com");
   });
 
   it("filters agent address from CC", async () => {

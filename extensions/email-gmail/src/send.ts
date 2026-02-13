@@ -85,6 +85,8 @@ function buildReplyAllRecipients(
   const primaryTo = extractEmail(deliveryCtx.replyTo || deliveryCtx.from || recipientEmail)
     .trim()
     .toLowerCase();
+  const originalFrom = deliveryCtx.from ? extractEmail(deliveryCtx.from).trim().toLowerCase() : "";
+  const agentFrom = extractEmail(fromAddress).trim().toLowerCase();
 
   const seen = new Set<string>();
   const cc: string[] = [];
@@ -106,7 +108,12 @@ function buildReplyAllRecipients(
   };
 
   markSeen(primaryTo || fallbackTo);
-  markSeen(fromAddress);
+  markSeen(agentFrom);
+
+  // Keep the original sender in reply-all when Reply-To redirects the primary To.
+  if (originalFrom) {
+    addCc(originalFrom);
+  }
 
   for (const addr of deliveryCtx.toRecipients || []) {
     addCc(addr);

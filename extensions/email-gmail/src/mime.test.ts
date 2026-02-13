@@ -48,6 +48,9 @@ describe("buildRawMimeMessage", () => {
     });
 
     expect(msg).toContain("Cc: copy@example.com, team@example.com");
+    expect(msg.indexOf("Cc: copy@example.com, team@example.com")).toBeLessThan(
+      msg.indexOf("Content-Type: multipart/alternative"),
+    );
   });
 
   it("omits threading headers when not provided", () => {

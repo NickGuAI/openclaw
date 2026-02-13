@@ -16,19 +16,17 @@ export function buildRawMimeMessage(params: MimeMessageParams): string {
   const boundary = `----=_Part_${randomBytes(12).toString("hex")}`;
   const messageId = params.messageId || `<${randomBytes(16).toString("hex")}@openclaw.email>`;
 
-  const headers: string[] = [
-    `From: ${params.from}`,
-    `To: ${params.to}`,
+  const headers: string[] = [`From: ${params.from}`, `To: ${params.to}`];
+  if (params.cc) {
+    headers.push(`Cc: ${params.cc}`);
+  }
+  headers.push(
     `Subject: ${params.subject}`,
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: ${messageId}`,
     `MIME-Version: 1.0`,
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
-  ];
-
-  if (params.cc) {
-    headers.push(`Cc: ${params.cc}`);
-  }
+  );
   if (params.inReplyTo) {
     headers.push(`In-Reply-To: ${params.inReplyTo}`);
   }
