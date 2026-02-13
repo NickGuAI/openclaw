@@ -1,7 +1,7 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { randomBytes } from "node:crypto";
 import type { GmailCredentials } from "./gmail-auth.js";
-import type { EmailGmailChannelConfig } from "./types.js";
+import type { EmailDeliveryContext, EmailGmailChannelConfig } from "./types.js";
 import {
   readDeliveryContext,
   updateDeliveryContextMessageId,
@@ -46,6 +46,11 @@ function createMessageId(): string {
   return `<${randomBytes(16).toString("hex")}@openclaw.email>`;
 }
 
+function extractEmailAddress(from: string): string {
+  const match = from.match(/<([^>]+)>/);
+  return match ? match[1] : from.trim();
+}
+
 function hasValidAccessToken(creds: GmailCredentials): boolean {
   if (!creds.accessToken) {
     return false;
@@ -72,6 +77,36 @@ async function sendWithToken(token: string, payload: Record<string, unknown>): P
     },
     body: JSON.stringify(payload),
   });
+}
+
+export function buildReplyAllRecipients(
+  deliveryCtx: EmailDeliveryContext,
+  recipientEmail: string,
+  fromAddress: string,
+): { to: string; cc: string[] } {
+  const primaryTo = (deliveryCtx.replyTo || extractEmailAddress(deliveryCtx.from || recipientEmail))
+    .trim()
+    .toLowerCase();
+  const seen = new Set<string>([primaryTo, extractEmailAddress(fromAddress).trim().toLowerCase()]);
+  const ccList: string[] = [];
+
+  const addRecipient = (email: string) => {
+    const normalized = extractEmailAddress(email).trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    ccList.push(normalized);
+  };
+
+  for (const addr of deliveryCtx.toRecipients || []) {
+    addRecipient(addr);
+  }
+  for (const addr of deliveryCtx.ccRecipients || []) {
+    addRecipient(addr);
+  }
+
+  return { to: primaryTo, cc: ccList };
 }
 
 export async function sendEmailGmail(params: SendEmailGmailParams): Promise<SendEmailGmailResult> {
@@ -113,7 +148,15 @@ export async function sendEmailGmail(params: SendEmailGmailParams): Promise<Send
   const subject = buildSubject(deliveryCtx);
 
   const fromHeader = fromName ? `"${fromName}" <${fromAddress}>` : fromAddress;
-  const toHeader = recipientEmail;
+  let toHeader: string;
+  let ccHeader: string | undefined;
+  if (deliveryCtx) {
+    const { to: replyTo, cc } = buildReplyAllRecipients(deliveryCtx, recipientEmail, fromAddress);
+    toHeader = replyTo;
+    ccHeader = cc.length > 0 ? cc.join(", ") : undefined;
+  } else {
+    toHeader = recipientEmail;
+  }
 
   const inReplyTo = deliveryCtx?.messageId || undefined;
   const references = deliveryCtx
@@ -124,6 +167,7 @@ export async function sendEmailGmail(params: SendEmailGmailParams): Promise<Send
   const rawMessage = buildRawMimeMessage({
     from: fromHeader,
     to: toHeader,
+    cc: ccHeader,
     subject,
     textBody: body,
     htmlBody: fullHtml,

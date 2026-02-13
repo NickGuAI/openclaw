@@ -26,6 +26,10 @@ type EmailHeaders = {
   messageId?: string;
   references?: string;
   inReplyTo?: string;
+  from?: string;
+  to?: string;
+  cc?: string;
+  replyTo?: string;
 };
 
 // Fetch RFC 2822 headers from Gmail API via gog CLI.
@@ -37,7 +41,7 @@ async function fetchMessageHeaders(msgId: string, account?: string): Promise<Ema
       "get",
       msgId,
       "--format=metadata",
-      "--headers=References,Message-Id,In-Reply-To",
+      "--headers=References,Message-Id,In-Reply-To,From,To,Cc,Reply-To",
       "--json",
     ];
     if (account) {
@@ -56,14 +60,21 @@ async function fetchMessageHeaders(msgId: string, account?: string): Promise<Ema
     }
     const result: EmailHeaders = {};
     for (const h of headers) {
-      if (h.name === "Message-ID" || h.name === "Message-Id") {
+      const name = h.name.toLowerCase();
+      if (name === "message-id") {
         result.messageId = h.value;
-      }
-      if (h.name === "References") {
+      } else if (name === "references") {
         result.references = h.value;
-      }
-      if (h.name === "In-Reply-To") {
+      } else if (name === "in-reply-to") {
         result.inReplyTo = h.value;
+      } else if (name === "from") {
+        result.from = h.value;
+      } else if (name === "to") {
+        result.to = h.value;
+      } else if (name === "cc") {
+        result.cc = h.value;
+      } else if (name === "reply-to") {
+        result.replyTo = h.value;
       }
     }
     return result;
@@ -72,10 +83,38 @@ async function fetchMessageHeaders(msgId: string, account?: string): Promise<Ema
   }
 }
 
-function extractEmail(from: string): string {
+export function extractEmail(from: string): string {
   // Extract email from "Name <email@example.com>" or plain "email@example.com"
   const match = from.match(/<([^>]+)>/);
   return match ? match[1] : from.trim();
+}
+
+export function parseAddressList(header: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < header.length; i += 1) {
+    const char = header[i];
+    if (char === '"' && header[i - 1] !== "\\") {
+      inQuotes = !inQuotes;
+      current += char;
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current) {
+    parts.push(current);
+  }
+
+  return parts
+    .map((segment) => extractEmail(segment).trim().toLowerCase())
+    .filter((segment) => segment.length > 0);
 }
 
 function formatEmailMessage(params: { from: string; subject?: string; body: string }): string {
@@ -146,6 +185,9 @@ export default async function transform(ctx: {
   const messageId = hdrs.messageId || msg.messageId;
   const references = hdrs.references || msg.references;
   const inReplyTo = hdrs.inReplyTo || msg.inReplyTo;
+  const replyTo = hdrs.replyTo ? extractEmail(hdrs.replyTo).trim().toLowerCase() : undefined;
+  const toRecipients = hdrs.to ? parseAddressList(hdrs.to) : [];
+  const ccRecipients = hdrs.cc ? parseAddressList(hdrs.cc) : [];
 
   // Resolve thread key: if this message replies to a known outbound message,
   // use the same thread key as the original conversation.
@@ -158,7 +200,10 @@ export default async function transform(ctx: {
     messageId,
     subject: msg.subject,
     references,
-    from: msg.from,
+    from: hdrs.from || msg.from,
+    replyTo,
+    toRecipients,
+    ccRecipients,
   });
 
   return {

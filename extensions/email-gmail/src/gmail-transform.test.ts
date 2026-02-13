@@ -26,7 +26,7 @@ vi.mock("./delivery-context.js", () => ({
 }));
 
 import { resolveThreadKeyByMessageId, writeDeliveryContext } from "./delivery-context.js";
-import transform from "./gmail-transform.js";
+import transform, { parseAddressList } from "./gmail-transform.js";
 
 // Helper: make gog return specific headers
 function mockGogHeaders(headers: Array<{ name: string; value: string }>) {
@@ -222,6 +222,9 @@ describe("gmail-transform", () => {
       subject: "Test",
       references: undefined,
       from: "user@test.com",
+      replyTo: undefined,
+      toRecipients: [],
+      ccRecipients: [],
     });
   });
 
@@ -357,6 +360,45 @@ describe("gmail-transform", () => {
       subject: "Re: Original subject",
       references: "<ses-reply@amazonses.com>",
       from: "user@example.com",
+      replyTo: undefined,
+      toRecipients: [],
+      ccRecipients: [],
+    });
+  });
+
+  it("captures CC, To, and Reply-To headers from gog metadata", async () => {
+    mockGogHeaders([
+      { name: "From", value: "Sender Name <sender@example.com>" },
+      { name: "To", value: "Agent <agent@test.com>, Teammate <teammate@example.com>" },
+      { name: "CC", value: "Alice <a@x.com>, bob@x.com" },
+      { name: "Reply-To", value: "Replies <reply@example.com>" },
+    ]);
+
+    await transform({
+      ...baseCtx,
+      payload: {
+        messages: [
+          {
+            id: "msg-headers",
+            threadId: "t-headers",
+            from: "payload-from@example.com",
+            to: "Agent <agent@test.com>",
+            subject: "Header test",
+            body: "Hello",
+          },
+        ],
+      },
+    });
+
+    expect(writeDeliveryContext).toHaveBeenCalledWith("t-headers", {
+      threadId: "t-headers",
+      messageId: undefined,
+      subject: "Header test",
+      references: undefined,
+      from: "Sender Name <sender@example.com>",
+      replyTo: "reply@example.com",
+      toRecipients: ["agent@test.com", "teammate@example.com"],
+      ccRecipients: ["a@x.com", "bob@x.com"],
     });
   });
 
@@ -406,5 +448,32 @@ describe("gmail-transform", () => {
     const gogArgs = mockExecFileAsync.mock.calls[0][1] as string[];
     expect(gogArgs).toContain("--account");
     expect(gogArgs).toContain("agent@test.com");
+  });
+});
+
+describe("parseAddressList", () => {
+  it("parses plain comma-separated addresses", () => {
+    expect(parseAddressList("alice@example.com, bob@example.com")).toEqual([
+      "alice@example.com",
+      "bob@example.com",
+    ]);
+  });
+
+  it("parses name-and-bracket format and lowercases addresses", () => {
+    expect(parseAddressList("Alice <ALICE@Example.com>, Bob <bob@example.com>")).toEqual([
+      "alice@example.com",
+      "bob@example.com",
+    ]);
+  });
+
+  it("parses quoted names containing commas", () => {
+    expect(parseAddressList('"Doe, Jane" <jane@example.com>, team@example.com')).toEqual([
+      "jane@example.com",
+      "team@example.com",
+    ]);
+  });
+
+  it("returns empty array for empty/whitespace input", () => {
+    expect(parseAddressList("   ")).toEqual([]);
   });
 });
