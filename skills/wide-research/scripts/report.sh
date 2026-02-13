@@ -24,7 +24,7 @@ OUTPUT_ARG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --output) OUTPUT_ARG="$2"; shift 2 ;;
+    --output) [[ $# -ge 2 ]] || { echo "Error: --output requires a value" >&2; exit 1; }; OUTPUT_ARG="$2"; shift 2 ;;
     -h|--help) usage ;;
     *)
       if [[ -z "$PROJECT_DIR" ]]; then

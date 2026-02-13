@@ -77,12 +77,18 @@ for i in $(seq 0 $((ANGLE_COUNT - 1))); do
   TASK=$(echo "$SPEC" | jq -r ".angles[$i].task")
   REPORT_FILE="${PROJECT_DIR}/report-${LABEL}.md"
 
-  # Generate prompt from template
-  PROMPT="$TEMPLATE"
-  PROMPT="${PROMPT//\{TASK\}/$TASK}"
-  PROMPT="${PROMPT//\{REPORT_PATH\}/$REPORT_FILE}"
-  PROMPT="${PROMPT//\{PROJECT\}/$PROJECT_NAME}"
-  PROMPT="${PROMPT//\{TITLE\}/$TITLE}"
+  # Generate prompt from template (use jq for safe substitution)
+  PROMPT=$(jq -n \
+    --arg template "$TEMPLATE" \
+    --arg task "$TASK" \
+    --arg report_path "$REPORT_FILE" \
+    --arg project "$PROJECT_NAME" \
+    --arg title "$TITLE" \
+    '$template
+      | gsub("{TASK}"; $task)
+      | gsub("{REPORT_PATH}"; $report_path)
+      | gsub("{PROJECT}"; $project)
+      | gsub("{TITLE}"; $title)' -r)
 
   # Add report_path and prompt to spec
   ENRICHED_SPEC=$(echo "$ENRICHED_SPEC" | jq \

@@ -31,7 +31,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --fix-only) FIX_ONLY=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
-    --max-workers) MAX_WORKERS="$2"; shift 2 ;;
+    --max-workers)
+      [[ $# -ge 2 ]] || { echo "Error: --max-workers requires a value" >&2; exit 1; }
+      [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: --max-workers must be a positive integer" >&2; exit 1; }
+      MAX_WORKERS="$2"; shift 2 ;;
     -h|--help) usage ;;
     *)
       if [[ -z "$PROJECT_DIR" ]]; then

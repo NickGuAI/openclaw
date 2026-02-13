@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import html as html_mod
 import json
 import re
 import sys
@@ -157,6 +158,9 @@ def build_cover(specs: dict) -> str:
     description = specs.get("description", "")
     today = date.today().strftime("%B %Y")
     report_count = len(specs.get("angles", []))
+
+    project = html_mod.escape(project)
+    description = html_mod.escape(description)
 
     return f"""
 <span class="doc-title">{project}</span>
