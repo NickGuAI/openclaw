@@ -98,11 +98,7 @@ for i in $(seq 0 $((ANGLE_COUNT - 1))); do
     '.angles[($idx | tonumber)].report_path = $rpath | .angles[($idx | tonumber)].prompt = $prompt')
 
   # Write stub report
-  cat > "$REPORT_FILE" <<STUB
-# ${TITLE}
-
-${STUB_MARKER}
-STUB
+  printf '# %s\n\n%s\n' "$TITLE" "$STUB_MARKER" > "$REPORT_FILE"
 
   echo "  Created: report-${LABEL}.md"
 done

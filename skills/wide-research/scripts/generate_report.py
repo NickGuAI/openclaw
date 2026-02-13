@@ -179,7 +179,9 @@ def build_toc_html(entries: list[tuple[str, str, Path]]) -> str:
     lines = ['<div class="toc">', "<h2>Table of Contents</h2>", "<ul>"]
     for label, title, _ in entries:
         anchor = slugify(title)
-        lines.append(f'<li><a href="#{anchor}">{label}. {title}</a></li>')
+        escaped_title = html_mod.escape(title)
+        escaped_label = html_mod.escape(label)
+        lines.append(f'<li><a href="#{anchor}">{escaped_label}. {escaped_title}</a></li>')
     lines.append("</ul></div>")
     return "\n".join(lines)
 

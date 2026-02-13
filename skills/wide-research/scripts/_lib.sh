@@ -7,6 +7,10 @@ _ENV_FILE="${_SKILL_DIR}/.env"
 
 STUB_MARKER="_Key findings will appear here_"
 MAX_WORKERS="${MAX_WORKERS:-10}"
+if ! [[ "$MAX_WORKERS" =~ ^[0-9]+$ ]]; then
+  echo "Error: MAX_WORKERS must be a positive integer (got: $MAX_WORKERS)" >&2
+  exit 1
+fi
 POLL_INTERVAL="${POLL_INTERVAL:-10}"
 
 require_bin() {
