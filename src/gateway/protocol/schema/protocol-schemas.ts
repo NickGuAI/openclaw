@@ -13,6 +13,8 @@ import {
   AgentSummarySchema,
   AgentsCreateParamsSchema,
   AgentsCreateResultSchema,
+  AgentsDeleteParamsSchema,
+  AgentsDeleteResultSchema,
   AgentsFileEntrySchema,
   AgentsFilesGetParamsSchema,
   AgentsFilesGetResultSchema,
@@ -22,6 +24,8 @@ import {
   AgentsFilesSetResultSchema,
   AgentsListParamsSchema,
   AgentsListResultSchema,
+  AgentsUpdateParamsSchema,
+  AgentsUpdateResultSchema,
   ModelChoiceSchema,
   ModelsListParamsSchema,
   ModelsListResultSchema,
@@ -33,6 +37,8 @@ import {
 } from "./agents-models-skills.js";
 import {
   ChannelsLogoutParamsSchema,
+  TalkConfigParamsSchema,
+  TalkConfigResultSchema,
   ChannelsStatusParamsSchema,
   ChannelsStatusResultSchema,
   TalkModeParamsSchema,
@@ -119,6 +125,7 @@ import {
   SessionsPreviewParamsSchema,
   SessionsResetParamsSchema,
   SessionsResolveParamsSchema,
+  SessionsUsageParamsSchema,
 } from "./sessions.js";
 import { PresenceEntrySchema, SnapshotSchema, StateVersionSchema } from "./snapshot.js";
 import {
@@ -170,6 +177,7 @@ export const ProtocolSchemas: Record<string, TSchema> = {
   SessionsResetParams: SessionsResetParamsSchema,
   SessionsDeleteParams: SessionsDeleteParamsSchema,
   SessionsCompactParams: SessionsCompactParamsSchema,
+  SessionsUsageParams: SessionsUsageParamsSchema,
   ConfigGetParams: ConfigGetParamsSchema,
   ConfigSetParams: ConfigSetParamsSchema,
   ConfigApplyParams: ConfigApplyParamsSchema,
@@ -185,6 +193,8 @@ export const ProtocolSchemas: Record<string, TSchema> = {
   WizardStartResult: WizardStartResultSchema,
   WizardStatusResult: WizardStatusResultSchema,
   TalkModeParams: TalkModeParamsSchema,
+  TalkConfigParams: TalkConfigParamsSchema,
+  TalkConfigResult: TalkConfigResultSchema,
   ChannelsStatusParams: ChannelsStatusParamsSchema,
   ChannelsStatusResult: ChannelsStatusResultSchema,
   ChannelsLogoutParams: ChannelsLogoutParamsSchema,
@@ -193,6 +203,10 @@ export const ProtocolSchemas: Record<string, TSchema> = {
   AgentSummary: AgentSummarySchema,
   AgentsCreateParams: AgentsCreateParamsSchema,
   AgentsCreateResult: AgentsCreateResultSchema,
+  AgentsUpdateParams: AgentsUpdateParamsSchema,
+  AgentsUpdateResult: AgentsUpdateResultSchema,
+  AgentsDeleteParams: AgentsDeleteParamsSchema,
+  AgentsDeleteResult: AgentsDeleteResultSchema,
   AgentsFileEntry: AgentsFileEntrySchema,
   AgentsFilesListParams: AgentsFilesListParamsSchema,
   AgentsFilesListResult: AgentsFilesListResultSchema,
