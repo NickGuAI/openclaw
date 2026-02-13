@@ -37,6 +37,19 @@ describe("buildRawMimeMessage", () => {
     expect(msg).toContain("References: <xyz789@mail.gmail.com> <abc123@mail.gmail.com>");
   });
 
+  it("includes Cc header when provided", () => {
+    const msg = buildRawMimeMessage({
+      from: "agent@test.com",
+      to: "user@example.com",
+      cc: "copy@example.com, team@example.com",
+      subject: "Re: Test",
+      textBody: "Reply",
+      htmlBody: "<p>Reply</p>",
+    });
+
+    expect(msg).toContain("Cc: copy@example.com, team@example.com");
+  });
+
   it("omits threading headers when not provided", () => {
     const msg = buildRawMimeMessage({
       from: "agent@test.com",
@@ -48,6 +61,18 @@ describe("buildRawMimeMessage", () => {
 
     expect(msg).not.toContain("In-Reply-To:");
     expect(msg).not.toContain("References:");
+  });
+
+  it("omits Cc header when not provided", () => {
+    const msg = buildRawMimeMessage({
+      from: "agent@test.com",
+      to: "user@example.com",
+      subject: "Test",
+      textBody: "Hello",
+      htmlBody: "<p>Hello</p>",
+    });
+
+    expect(msg).not.toContain("Cc:");
   });
 
   it("includes Message-ID and Date headers", () => {

@@ -209,4 +209,177 @@ describe("sendEmailGmail", () => {
     const decoded = decodeBase64Url(body.raw);
     expect(decoded).toContain("https://example.com/image.png");
   });
+
+  it("sends reply-all with CC from delivery context", async () => {
+    vi.mocked(resolveGmailCredentials).mockResolvedValue({
+      clientId: "cid",
+      clientSecret: "secret",
+      refreshToken: "refresh",
+      accessToken: "access",
+      expiresAt: Date.now() + 60_000,
+    });
+    vi.mocked(readDeliveryContext).mockResolvedValueOnce({
+      threadId: "gmail-thread-1",
+      subject: "Thread Subject",
+      messageId: "<inbound@gmail.com>",
+      from: "Sender <sender@example.com>",
+      toRecipients: ["agent@test.com", "teammate@example.com"],
+      ccRecipients: ["observer@example.com"],
+    });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "gmail-reply-all-1" }),
+      text: async () => "",
+    });
+
+    await sendEmailGmail({
+      cfg: baseCfg,
+      to: "sender@example.com##thread-reply-all",
+      text: "Reply all message",
+    });
+
+    const call = fetchMock.mock.calls[0];
+    const body = JSON.parse(call[1].body as string) as { raw: string };
+    const decoded = decodeBase64Url(body.raw);
+    expect(decoded).toContain("To: sender@example.com");
+    expect(decoded).toContain("Cc: teammate@example.com, observer@example.com");
+  });
+
+  it("uses Reply-To as primary To when present", async () => {
+    vi.mocked(resolveGmailCredentials).mockResolvedValue({
+      clientId: "cid",
+      clientSecret: "secret",
+      refreshToken: "refresh",
+      accessToken: "access",
+      expiresAt: Date.now() + 60_000,
+    });
+    vi.mocked(readDeliveryContext).mockResolvedValueOnce({
+      threadId: "gmail-thread-2",
+      subject: "Thread Subject",
+      messageId: "<inbound@gmail.com>",
+      from: "Sender <sender@example.com>",
+      replyTo: "reply-to@example.com",
+      toRecipients: ["agent@test.com"],
+      ccRecipients: [],
+    });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "gmail-reply-all-2" }),
+      text: async () => "",
+    });
+
+    await sendEmailGmail({
+      cfg: baseCfg,
+      to: "sender@example.com##thread-reply-to",
+      text: "Reply all message",
+    });
+
+    const call = fetchMock.mock.calls[0];
+    const body = JSON.parse(call[1].body as string) as { raw: string };
+    const decoded = decodeBase64Url(body.raw);
+    expect(decoded).toContain("To: reply-to@example.com");
+  });
+
+  it("filters agent address from CC", async () => {
+    vi.mocked(resolveGmailCredentials).mockResolvedValue({
+      clientId: "cid",
+      clientSecret: "secret",
+      refreshToken: "refresh",
+      accessToken: "access",
+      expiresAt: Date.now() + 60_000,
+    });
+    vi.mocked(readDeliveryContext).mockResolvedValueOnce({
+      threadId: "gmail-thread-3",
+      subject: "Thread Subject",
+      messageId: "<inbound@gmail.com>",
+      from: "Sender <sender@example.com>",
+      toRecipients: ["AGENT@test.com", "teammate@example.com"],
+      ccRecipients: ["agent@test.com", "third@example.com"],
+    });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "gmail-reply-all-3" }),
+      text: async () => "",
+    });
+
+    await sendEmailGmail({
+      cfg: baseCfg,
+      to: "sender@example.com##thread-filter-agent",
+      text: "Reply all message",
+    });
+
+    const call = fetchMock.mock.calls[0];
+    const body = JSON.parse(call[1].body as string) as { raw: string };
+    const decoded = decodeBase64Url(body.raw);
+    expect(decoded).toContain("Cc: teammate@example.com, third@example.com");
+    expect(decoded).not.toContain("Cc: AGENT@test.com");
+    expect(decoded).not.toContain("Cc: agent@test.com");
+  });
+
+  it("deduplicates addresses across To and CC", async () => {
+    vi.mocked(resolveGmailCredentials).mockResolvedValue({
+      clientId: "cid",
+      clientSecret: "secret",
+      refreshToken: "refresh",
+      accessToken: "access",
+      expiresAt: Date.now() + 60_000,
+    });
+    vi.mocked(readDeliveryContext).mockResolvedValueOnce({
+      threadId: "gmail-thread-4",
+      subject: "Thread Subject",
+      messageId: "<inbound@gmail.com>",
+      from: "Sender <sender@example.com>",
+      toRecipients: ["dup@example.com", "unique-to@example.com"],
+      ccRecipients: ["Dup@example.com", "unique-cc@example.com", "unique-to@example.com"],
+    });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "gmail-reply-all-4" }),
+      text: async () => "",
+    });
+
+    await sendEmailGmail({
+      cfg: baseCfg,
+      to: "sender@example.com##thread-dedupe",
+      text: "Reply all message",
+    });
+
+    const call = fetchMock.mock.calls[0];
+    const body = JSON.parse(call[1].body as string) as { raw: string };
+    const decoded = decodeBase64Url(body.raw);
+    expect(decoded).toContain("Cc: dup@example.com, unique-to@example.com, unique-cc@example.com");
+  });
+
+  it("omits CC when delivery context is missing", async () => {
+    vi.mocked(resolveGmailCredentials).mockResolvedValue({
+      clientId: "cid",
+      clientSecret: "secret",
+      refreshToken: "refresh",
+      accessToken: "access",
+      expiresAt: Date.now() + 60_000,
+    });
+    vi.mocked(readDeliveryContext).mockResolvedValueOnce(null);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "gmail-no-context" }),
+      text: async () => "",
+    });
+
+    await sendEmailGmail({
+      cfg: baseCfg,
+      to: "user@example.com##missing-context",
+      text: "Reply",
+    });
+
+    const call = fetchMock.mock.calls[0];
+    const body = JSON.parse(call[1].body as string) as { raw: string };
+    const decoded = decodeBase64Url(body.raw);
+    expect(decoded).toContain("To: user@example.com");
+    expect(decoded).not.toContain("Cc:");
+  });
 });

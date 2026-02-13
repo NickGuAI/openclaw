@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 export type MimeMessageParams = {
   from: string;
   to: string;
+  cc?: string;
   subject: string;
   textBody: string;
   htmlBody: string;
@@ -25,6 +26,9 @@ export function buildRawMimeMessage(params: MimeMessageParams): string {
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
   ];
 
+  if (params.cc) {
+    headers.push(`Cc: ${params.cc}`);
+  }
   if (params.inReplyTo) {
     headers.push(`In-Reply-To: ${params.inReplyTo}`);
   }
