@@ -23,6 +23,9 @@ export type EmailDeliveryContext = {
   subject?: string;
   references?: string;
   from?: string;
+  replyTo?: string;
+  toRecipients?: string[];
+  ccRecipients?: string[];
 };
 
 export type ResolvedEmailGmailAccount = {

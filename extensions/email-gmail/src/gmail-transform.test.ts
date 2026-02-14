@@ -26,7 +26,7 @@ vi.mock("./delivery-context.js", () => ({
 }));
 
 import { resolveThreadKeyByMessageId, writeDeliveryContext } from "./delivery-context.js";
-import transform from "./gmail-transform.js";
+import transform, { parseAddressList } from "./gmail-transform.js";
 
 // Helper: make gog return specific headers
 function mockGogHeaders(headers: Array<{ name: string; value: string }>) {
@@ -222,6 +222,9 @@ describe("gmail-transform", () => {
       subject: "Test",
       references: undefined,
       from: "user@test.com",
+      replyTo: undefined,
+      toRecipients: [],
+      ccRecipients: [],
     });
   });
 
@@ -357,6 +360,9 @@ describe("gmail-transform", () => {
       subject: "Re: Original subject",
       references: "<ses-reply@amazonses.com>",
       from: "user@example.com",
+      replyTo: undefined,
+      toRecipients: [],
+      ccRecipients: [],
     });
   });
 
@@ -406,5 +412,65 @@ describe("gmail-transform", () => {
     const gogArgs = mockExecFileAsync.mock.calls[0][1] as string[];
     expect(gogArgs).toContain("--account");
     expect(gogArgs).toContain("agent@test.com");
+  });
+
+  it("captures CC, To, and Reply-To from gog headers", async () => {
+    mockGogHeaders([
+      { name: "From", value: '"Header Sender" <header-sender@example.com>' },
+      { name: "To", value: "Agent <agent@test.com>, Teammate <teammate@example.com>" },
+      { name: "Cc", value: "Alice <alice@example.com>, bob@example.com" },
+      { name: "Reply-To", value: '"Reply User" <reply@example.com>' },
+    ]);
+
+    await transform({
+      ...baseCtx,
+      payload: {
+        messages: [
+          {
+            id: "msg-with-headers",
+            threadId: "thread-with-headers",
+            from: "Fallback Sender <fallback@example.com>",
+            subject: "Header capture",
+            body: "Body",
+          },
+        ],
+      },
+    });
+
+    expect(writeDeliveryContext).toHaveBeenCalledWith("thread-with-headers", {
+      threadId: "thread-with-headers",
+      messageId: undefined,
+      subject: "Header capture",
+      references: undefined,
+      from: '"Header Sender" <header-sender@example.com>',
+      replyTo: "reply@example.com",
+      toRecipients: ["agent@test.com", "teammate@example.com"],
+      ccRecipients: ["alice@example.com", "bob@example.com"],
+    });
+  });
+});
+
+describe("parseAddressList", () => {
+  it("parses a plain email", () => {
+    expect(parseAddressList("plain@example.com")).toEqual(["plain@example.com"]);
+  });
+
+  it("parses name and angle bracket format", () => {
+    expect(parseAddressList("Alice Example <alice@example.com>")).toEqual(["alice@example.com"]);
+  });
+
+  it("parses multi-address CC header", () => {
+    expect(parseAddressList("Alice <a@x.com>, bob@x.com")).toEqual(["a@x.com", "bob@x.com"]);
+  });
+
+  it("handles quoted commas in names", () => {
+    expect(parseAddressList('"Doe, Jane" <jane@x.com>, "Ops, Team" <ops@x.com>')).toEqual([
+      "jane@x.com",
+      "ops@x.com",
+    ]);
+  });
+
+  it("drops empty segments", () => {
+    expect(parseAddressList(" , , ")).toEqual([]);
   });
 });

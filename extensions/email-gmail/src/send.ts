@@ -2,11 +2,13 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { randomBytes } from "node:crypto";
 import type { GmailCredentials } from "./gmail-auth.js";
 import type { EmailGmailChannelConfig } from "./types.js";
+import type { EmailDeliveryContext } from "./types.js";
 import {
   readDeliveryContext,
   updateDeliveryContextMessageId,
   writeMessageIdIndex,
 } from "./delivery-context.js";
+import { extractEmail } from "./email-address.js";
 import { buildSubject, markdownToHtml, wrapHtmlEmail } from "./format.js";
 import { refreshGmailAccessToken, resolveGmailCredentials } from "./gmail-auth.js";
 import { buildRawMimeMessage } from "./mime.js";
@@ -74,6 +76,55 @@ async function sendWithToken(token: string, payload: Record<string, unknown>): P
   });
 }
 
+function buildReplyAllRecipients(
+  deliveryCtx: EmailDeliveryContext,
+  recipientEmail: string,
+  fromAddress: string,
+): { to: string; cc: string[] } {
+  const fallbackTo = extractEmail(recipientEmail).trim().toLowerCase();
+  const primaryTo = extractEmail(deliveryCtx.replyTo || deliveryCtx.from || recipientEmail)
+    .trim()
+    .toLowerCase();
+  const originalFrom = deliveryCtx.from ? extractEmail(deliveryCtx.from).trim().toLowerCase() : "";
+  const agentFrom = extractEmail(fromAddress).trim().toLowerCase();
+
+  const seen = new Set<string>();
+  const cc: string[] = [];
+
+  const markSeen = (email: string): void => {
+    const normalized = email.trim().toLowerCase();
+    if (normalized) {
+      seen.add(normalized);
+    }
+  };
+
+  const addCc = (email: string): void => {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    cc.push(normalized);
+  };
+
+  markSeen(primaryTo || fallbackTo);
+  markSeen(agentFrom);
+
+  // Keep the original sender in reply-all when Reply-To redirects the primary To.
+  if (originalFrom) {
+    addCc(originalFrom);
+  }
+
+  for (const addr of deliveryCtx.toRecipients || []) {
+    addCc(addr);
+  }
+  for (const addr of deliveryCtx.ccRecipients || []) {
+    addCc(addr);
+  }
+
+  return { to: primaryTo || fallbackTo, cc };
+}
+
 export async function sendEmailGmail(params: SendEmailGmailParams): Promise<SendEmailGmailResult> {
   const { cfg, to, text, mediaUrl } = params;
 
@@ -113,7 +164,19 @@ export async function sendEmailGmail(params: SendEmailGmailParams): Promise<Send
   const subject = buildSubject(deliveryCtx);
 
   const fromHeader = fromName ? `"${fromName}" <${fromAddress}>` : fromAddress;
-  const toHeader = recipientEmail;
+  let toHeader: string;
+  let ccHeader: string | undefined;
+  if (deliveryCtx) {
+    const { to: replyAllTo, cc } = buildReplyAllRecipients(
+      deliveryCtx,
+      recipientEmail,
+      fromAddress,
+    );
+    toHeader = replyAllTo;
+    ccHeader = cc.length > 0 ? cc.join(", ") : undefined;
+  } else {
+    toHeader = recipientEmail;
+  }
 
   const inReplyTo = deliveryCtx?.messageId || undefined;
   const references = deliveryCtx
@@ -124,6 +187,7 @@ export async function sendEmailGmail(params: SendEmailGmailParams): Promise<Send
   const rawMessage = buildRawMimeMessage({
     from: fromHeader,
     to: toHeader,
+    cc: ccHeader,
     subject,
     textBody: body,
     htmlBody: fullHtml,
