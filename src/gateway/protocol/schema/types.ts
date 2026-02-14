@@ -12,8 +12,6 @@ import type {
   AgentsCreateParamsSchema,
   AgentsCreateResultSchema,
   AgentsFileEntrySchema,
-  AgentsCreateParamsSchema,
-  AgentsCreateResultSchema,
   AgentsDeleteParamsSchema,
   AgentsDeleteResultSchema,
   AgentsFilesGetParamsSchema,
@@ -195,8 +193,6 @@ export type AgentSummary = Static<typeof AgentSummarySchema>;
 export type AgentsCreateParams = Static<typeof AgentsCreateParamsSchema>;
 export type AgentsCreateResult = Static<typeof AgentsCreateResultSchema>;
 export type AgentsFileEntry = Static<typeof AgentsFileEntrySchema>;
-export type AgentsCreateParams = Static<typeof AgentsCreateParamsSchema>;
-export type AgentsCreateResult = Static<typeof AgentsCreateResultSchema>;
 export type AgentsUpdateParams = Static<typeof AgentsUpdateParamsSchema>;
 export type AgentsUpdateResult = Static<typeof AgentsUpdateResultSchema>;
 export type AgentsDeleteParams = Static<typeof AgentsDeleteParamsSchema>;
